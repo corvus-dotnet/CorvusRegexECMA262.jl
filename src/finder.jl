@@ -435,13 +435,18 @@ never misses one: every candidate is compared with the literals.
     return out
 end
 
-"The lanes of 32 bytes that pass the tests of a position, the masks and values each a byte broadcast."
-@inline function pass32(x::V8x32, m::Vector{UInt64}, v::Vector{UInt64})
-    out = eq_or_mask(x, splat32(m[1] % UInt8), splat32(v[1] % UInt8))
-    @inbounds for k in 2:length(m)
-        out |= eq_or_mask(x, splat32(m[k] % UInt8), splat32(v[k] % UInt8))
-    end
-    return out
+"""
+The tests of a position as four masks and four values, each a byte broadcast over a vector, the last test repeated where
+there are fewer: a test made twice passes the same lanes, so the four are made without a branch.
+"""
+function tests32(m::Vector{UInt64}, v::Vector{UInt64})
+    at(k) = min(k, length(m))
+    return ntuple(k -> splat32(m[at(k)] % UInt8), Val(4)), ntuple(k -> splat32(v[at(k)] % UInt8), Val(4))
+end
+
+"The lanes of 32 bytes that pass one of a position's four tests."
+@inline function pass32(x::V8x32, (m, v)::Tuple{NTuple{4,V8x32},NTuple{4,V8x32}})
+    return eq_or_mask(x, m[1], v[1]) | eq_or_mask(x, m[2], v[2]) | eq_or_mask(x, m[3], v[3]) | eq_or_mask(x, m[4], v[4])
 end
 
 """
@@ -459,8 +464,8 @@ function find(f::PairFinder, h::Dense8, from::Int, end_::Int)
         mj, vj = splat32(f.mj[1] % UInt8), splat32(f.vj[1] % UInt8)
         # Two vectors of starts at a time, so that the loop's branch is taken once in 64 starts.
         while at <= blocks - 32
-            m0 = eq_or_mask(load32(h, at + f.i), mi, vi) & eq_or_mask(load32(h, at + f.j), mj, vj)
-            m1 = eq_or_mask(load32(h, at + 32 + f.i), mi, vi) & eq_or_mask(load32(h, at + 32 + f.j), mj, vj)
+            m0 = pair_mask(load32(h, at + f.i), mi, vi, load32(h, at + f.j), mj, vj)
+            m1 = pair_mask(load32(h, at + 32 + f.i), mi, vi, load32(h, at + 32 + f.j), mj, vj)
             if m0 | m1 != 0
                 m = UInt64(m1) << 32 | m0
                 while m != 0
@@ -475,7 +480,7 @@ function find(f::PairFinder, h::Dense8, from::Int, end_::Int)
             at += 64
         end
         while at <= blocks
-            m = eq_or_mask(load32(h, at + f.i), mi, vi) & eq_or_mask(load32(h, at + f.j), mj, vj)
+            m = pair_mask(load32(h, at + f.i), mi, vi, load32(h, at + f.j), mj, vj)
             while m != 0
                 s = at + trailing_zeros(m)
                 if s <= last
@@ -487,8 +492,9 @@ function find(f::PairFinder, h::Dense8, from::Int, end_::Int)
             at += 32
         end
     else
+        ti, tj = tests32(f.mi, f.vi), tests32(f.mj, f.vj)
         while at <= blocks
-            m = pass32(load32(h, at + f.i), f.mi, f.vi) & pass32(load32(h, at + f.j), f.mj, f.vj)
+            m = pass32(load32(h, at + f.i), ti) & pass32(load32(h, at + f.j), tj)
             while m != 0
                 s = at + trailing_zeros(m)
                 if s <= last

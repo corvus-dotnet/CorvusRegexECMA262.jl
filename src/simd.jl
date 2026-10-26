@@ -27,6 +27,19 @@ const V16x16 = NTuple{16,VecElement{UInt16}}
     %r = bitcast <32 x i1> %c to i32
     ret i32 %r""", UInt32, Tuple{V8x32,V8x32,V8x32}, x, m, v)
 
+"""
+The starts that pass both positions' tests of the pair search, x | m == v at each, the two compares joined before the
+move to an integer.
+"""
+@inline pair_mask(xi::V8x32, mi::V8x32, vi::V8x32, xj::V8x32, mj::V8x32, vj::V8x32) = Base.llvmcall("""
+    %oi = or <32 x i8> %0, %1
+    %ci = icmp eq <32 x i8> %oi, %2
+    %oj = or <32 x i8> %3, %4
+    %cj = icmp eq <32 x i8> %oj, %5
+    %c = and <32 x i1> %ci, %cj
+    %r = bitcast <32 x i1> %c to i32
+    ret i32 %r""", UInt32, Tuple{V8x32,V8x32,V8x32,V8x32,V8x32,V8x32}, xi, mi, vi, xj, mj, vj)
+
 "The lanes of x from lo to lo + width."
 @inline range_mask(x::V8x32, lo::V8x32, width::V8x32) = Base.llvmcall("""
     %d = sub <32 x i8> %0, %1

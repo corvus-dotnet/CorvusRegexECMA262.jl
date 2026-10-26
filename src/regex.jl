@@ -311,9 +311,9 @@ Each match of a global search, at most `n` (all when `n` is below 0), as its slo
 the bounds of the whole match alone otherwise.
 """
 find_all(re::EcmaRegex, input::Text16or8, n::Int, submatch::Bool) =
-    with_state(st -> find_all(re, input, n, submatch, st))
+    with_state(st -> find_all(re, input, n, submatch, st), re.prog)
 
-function find_all(re::EcmaRegex, input::Text16or8, n::Int, submatch::Bool, st::State)
+function find_all(re::EcmaRegex, input::Text16or8, n::Int, submatch::Bool, st::Union{Nothing,State})
     out = Vector{Int}[]
     at = 0
     while n < 0 || length(out) < n
@@ -336,9 +336,10 @@ The text with the first match, or every match with `all`, replaced by the templa
 with the template's \$ forms (\$\$, \$&, \$`, \$', \$n, \$nn and \$<name>) replaced. At most `count` matches are replaced.
 """
 replace_units(re::EcmaRegex, input::Text16or8, template::Text16or8, all::Bool; count::Int=typemax(Int)) =
-    with_state(st -> replace_units(re, input, template, all, count, st))
+    with_state(st -> replace_units(re, input, template, all, count, st), re.prog)
 
-function replace_units(re::EcmaRegex, input::Text16or8, template::Text16or8, all::Bool, count::Int, st::State)
+function replace_units(re::EcmaRegex, input::Text16or8, template::Text16or8, all::Bool, count::Int,
+    st::Union{Nothing,State})
     slots = Vector{Int}(undef, 2 * (re.groups + 1))
     out = out_vector(input)
     last, at, any_found, done = 0, 0, false, 0
@@ -434,9 +435,10 @@ not take part, with at most `limit` items (all when `limit` is below 0). The fla
 with a copy of the pattern that is sticky, from each position in turn, which is what a search from the position finds
 first.
 """
-split_units(re::EcmaRegex, input::Text16or8, limit::Int) = with_state(st -> split_units(re, input, limit, st))
+split_units(re::EcmaRegex, input::Text16or8, limit::Int) =
+    with_state(st -> split_units(re, input, limit, st), re.prog)
 
-function split_units(re::EcmaRegex, input::Text16or8, limit::Int, st::State)
+function split_units(re::EcmaRegex, input::Text16or8, limit::Int, st::Union{Nothing,State})
     size = length(input)
     out = Tuple{Int,Int}[]
     limit == 0 && return out

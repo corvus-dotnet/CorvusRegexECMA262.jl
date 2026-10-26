@@ -59,7 +59,9 @@ end
 f(st) with a state taken from the pool and given back after, for a global search: taking a state and giving it back is
 work for each match that one search of many matches pays once.
 """
-function with_state(f)
+function with_state(f, p::Program)
+    # A search of a simple shape uses no state (see exec).
+    p.groups == 0 && !p.anchored && p.search.shape != SHAPE_NONE && return f(nothing)
     st = take_state()
     try
         return f(st)
