@@ -9,11 +9,12 @@ the Go engine, so the numbers are the crate's. Section 5 (the source generator) 
 whole: generated code is deferred, as the plan records.
 
 The Rust crate takes its searches from `memchr` and `aho-corasick`, whose kernels are vector code. Julia has neither,
-and the plan keeps SIMD.jl out until a measured row needs it, so this port takes the searches of the Java and Go
-engines, which had the same problem: one byte by libc's `memchr` (vector code), two to four bytes and a range of bytes
-by SWAR (eight bytes of a `UInt64` read at a time and tested together, `swar.jl`), and UTF-16 units by SWAR over four
-units a word. Where that does a thing another way, or less well than the crate, the entry says so. How each search
-compares with the crate's, and with the other engines in Julia, is for the benchmark harness of step 3 to measure.
+so this port reads a text in memory of its own 32 bytes (16 UTF-16 units) at a time through vector compares written in
+LLVM's own types with `llvmcall` (`simd.jl`, a few lines, no dependency), which LLVM compiles to AVX2 or SSE on x86 and
+NEON on ARM: one byte by libc's `memchr`, and two to four bytes, a range of bytes, a pair of positions and the units of
+UTF-16 text by those compares; any other vector of units by SWAR (eight bytes of a `UInt64` at a time, `swar.jl`).
+Where that does a thing another way, or less well than the crate, the entry says so; the rows the benchmark still finds
+slower than Julia's PCRE2 are at the end.
 
 | Count | |
 |---|---|
@@ -48,7 +49,7 @@ compares with the crate's, and with the other engines in Julia, is for the bench
 | 16 | A literal after a run of disjoint unbounded loops, with a leading `\b`, the runs walked back to the earliest start | done | `PLAN_AFTER_LOOPS` (`search_after_loops`), with the crate's 0.2.1 floor. |
 | 17 | Several literals at once, by a cost model of one or two positions | done | Another way, as the Java engine: literals whose bytes at one position are up to four rare values, or a range of them, by the search for those bytes (`FirstsFinder`); literals two of whose positions take four masked tests or fewer by the pair search; any others by `TableFinder`, a table of the bytes at their rarest position read a byte at a time. |
 | 18 | The pairs of first characters of a sequence of classes as a multi-needle | done | Another way, as the crate: a class of up to four characters is one character of an anchor with several forms. |
-| 19 | Fingerprints (Teddy): buckets, nibble tables, up to three positions | not applicable | Teddy rests on a byte shuffle, which Julia reaches through SIMD.jl or LLVM intrinsics; the plan keeps SIMD.jl for a row that a measurement says needs it. The pair search's masked tests take what Teddy took in the crate where two positions have few values (a word's cases, a few names); a wider set goes to `TableFinder`. |
+| 19 | Fingerprints (Teddy): buckets, nibble tables, up to three positions | not applicable | Teddy rests on a byte shuffle; the pair search's masked tests over vectors take what Teddy took in the crate where two positions have few values (a word's cases, a few names), the prefix search takes four names by their first two bytes, and a wider set goes to `TableFinder`. |
 | 20 | The literal every alternative holds, at a fixed or bounded distance, the occurrences opening windows of starts tried in order and never twice | done | `PLAN_WINDOWS` (`search_windows`), through nested alternations. |
 | 21 | The case-insensitive search: a letter's forms in one search, masks joining the forms that differ in a bit | done | The forms are written out into literals, and the pair search compares the two cases of a letter (or of a Cyrillic lead byte) with one masked test, as the reference joins them. |
 | 22 | The long s and the Kelvin sign, whose UTF-8 is longer than s and k, looked for apart | done | Another way, as the crate: they are forms like any other. Over UTF-16 the packed search takes their low bytes in the one search. |
@@ -119,3 +120,24 @@ limit) is answered or refused. On each stack it answers the 964 probes as the cr
 answered, 590 refused, no fault (748 and 1,180 over the two), on Julia 1.10 and 1.13. On a stack of 1 MB a pattern of
 a thousand groups nested overflows it; Julia throws a `StackOverflowError` there, which the caller can catch, rather
 than ending the process.
+
+## Against Julia's PCRE2
+
+The Industry benchmark, measured on the pinned host with Base.Regex (PCRE2 10.46 with its JIT) and V8 in the same run
+(2026-10-26), finds this package over UTF-8 faster than PCRE2 on 45 of the 54 workloads both answer, and slower on these nine,
+by the ratio of its time to PCRE2's:
+
+| Workload | Over UTF-8 | Why |
+|---|--:|---|
+| `sherlock: aei` | 1.64 | No byte of the literal is rare, so it is the pair search over two common letters, 32 starts at a time; PCRE2's JIT reads the text in about two thirds of the time. |
+| `leipzig: Twain /i` | 1.57 | The pair search of the cases of two letters; as `aei`. |
+| `sherlock: Holmes.{0,25}Watson\|Watson.{0,25}Holmes` | 1.44 | The search for H or W turns up every capital H and W (about 2,000, each a branch the vector loop cannot foresee), and the anchored automaton reads up to 31 units after each of the 542 occurrences: 27 µs and 14 µs against PCRE2's 33 µs for both, which its JIT compiles into the pattern's code. |
+| `leipzig: Huck[a-zA-Z]+\|Saw[a-zA-Z]+` | 1.38 | As the Holmes window: every capital H and S of the text, then the run after each occurrence. |
+| `rebar-zh: 夏洛克·福尔摩斯` | 1.31 | A literal of three-byte characters, whose bytes are all common in Chinese text: the pair search. |
+| `leipzig: Twain` | 1.26 | The pair search on T and another position, as `aei`; the Leipzig corpus' rows move by a fifth between runs (PCRE2's Twain 603 µs in one, 474 in another). |
+| `rebar-ru: Шерлок Холмс` | 1.10 | The pair search over the two-byte forms of Cyrillic letters. |
+| `sherlock: Sher[a-z]+\|Hol[a-z]+` | 1.03 | As the Holmes window. |
+| `rebar-ru: Шерлок Холмс /i` | 1.00 | |
+
+No ECMA-262 rule makes the work: what is left is what a compiled pattern saves an interpreted one. The plan defers
+generated code (a matcher compiled for each pattern with Julia's own compiler), which is where these rows would go.
