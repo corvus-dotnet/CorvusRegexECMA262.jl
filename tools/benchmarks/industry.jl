@@ -325,7 +325,8 @@ function main(args)
     seconds, passes = get(opt, "--seconds", "0.7"), get(opt, "--passes", "7")
     limit = parse(Float64, get(opt, "--spread", "0.05"))
     filter_ = get(opt, "--filter", "")
-    ids = haskey(opt, "--ids") ? split(read(opt["--ids"], String)) : nothing
+    # One id a line: the ids hold spaces.
+    ids = haskey(opt, "--ids") ? filter(!isempty, strip.(readlines(opt["--ids"]))) : nothing
     all = workloads(path)
     chosen = [k for (k, w) in enumerate(all) if occursin(filter_, w["id"]) && (ids === nothing || w["id"] in ids)]
     plain = get(ENV, "CORVUS_REGEX_PLAIN", "")

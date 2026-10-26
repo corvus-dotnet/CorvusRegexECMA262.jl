@@ -221,9 +221,13 @@ The number of matches of a global search of the text.
 """
 function count_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes})
     units = checked_units(s)
+    return with_state(st -> count_units(re, units, st))
+end
+
+function count_units(re::EcmaRegex, units::Text16or8, st::State)
     n, at = 0, 0
     while at <= length(units)
-        from, to, found = exec_slots(re, units, at, re.flags.sticky, nothing)
+        from, to, found = exec_slots(re, units, at, re.flags.sticky, nothing, st)
         found || break
         n += 1
         at = next_start(re, units, from, to)
