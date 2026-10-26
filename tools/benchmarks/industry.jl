@@ -22,6 +22,10 @@
 # (PCRE2 with its JIT), which is given the pattern as it is and the flags i, m and s, counted by `count`, and whose
 # figure is an error where the pattern does not compile; and V8 (--v8, the harness run by node), with gu added.
 #
+# An engine may name another checkout of this repository as engine@<directory> (corvus-utf8@/tmp/base), which runs that
+# engine's figures with that checkout's package, so that two versions of the library are timed side by side in one
+# interleaved run.
+#
 # The texts are those of the reference run, in CORVUS_REGEX_TEXTS (or ~/.local/share/corvus-regex-benchmarks) and
 # fetched from dotnet/performance when missing. The run unzips each once into a directory of its own
 # (CORVUS_REGEX_PLAIN), which the children read.
@@ -227,6 +231,11 @@ end
 function figure(v8, path, index, engine, seconds, passes)
     cmd = if engine == "v8"
         `node $v8 --one $path $index $seconds $passes`
+    elseif occursin('@', engine)
+        # Another checkout of this repository, whose package and harness run the figure.
+        name, checkout = split(engine, '@'; limit=2)
+        script = joinpath(checkout, "tools", "benchmarks", "industry.jl")
+        `$(Base.julia_cmd()) --startup-file=no --project=$checkout $script --one $path $index $name $seconds $passes`
     else
         `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $(@__FILE__) --one $path $index $engine $seconds $passes`
     end

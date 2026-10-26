@@ -59,7 +59,24 @@ end
     return -1
 end
 
-"The first position at or after `from` and before `n` whose byte is a or b, or -1."
+"The first position at or after `from` and before `n` whose byte is a or b, or -1: 32 bytes at a time by vector compares."
+function index_byte2(h::Dense8, from::Int, n::Int, a::UInt8, b::UInt8)
+    va, vb = splat32(a), splat32(b)
+    at = from
+    while at <= n - 32
+        x = load32(h, at)
+        m = eq_mask(x, va) | eq_mask(x, vb)
+        m != 0 && return at + trailing_zeros(m)
+        at += 32
+    end
+    @inbounds while at < n
+        (h[at+1] == a || h[at+1] == b) && return at
+        at += 1
+    end
+    return -1
+end
+
+"index_byte2 over any vector of bytes, by SWAR words."
 function index_byte2(h::Bytes, from::Int, n::Int, a::UInt8, b::UInt8)
     va, vb = broadcast8(a), broadcast8(b)
     at = from
@@ -85,7 +102,28 @@ function index_byte2(h::Bytes, from::Int, n::Int, a::UInt8, b::UInt8)
     return -1
 end
 
-"The first position at or after `from` and before `n` whose byte is one of four (which may repeat), or -1."
+"""
+The first position at or after `from` and before `n` whose byte is one of four (which may repeat), or -1: 32 bytes at a
+time by vector compares.
+"""
+function index_byte4(h::Dense8, from::Int, n::Int, a::UInt8, b::UInt8, c::UInt8, d::UInt8)
+    va, vb, vc, vd = splat32(a), splat32(b), splat32(c), splat32(d)
+    at = from
+    while at <= n - 32
+        x = load32(h, at)
+        m = eq_mask(x, va) | eq_mask(x, vb) | eq_mask(x, vc) | eq_mask(x, vd)
+        m != 0 && return at + trailing_zeros(m)
+        at += 32
+    end
+    @inbounds while at < n
+        x = h[at+1]
+        (x == a || x == b || x == c || x == d) && return at
+        at += 1
+    end
+    return -1
+end
+
+"index_byte4 over any vector of bytes, by SWAR words."
 function index_byte4(h::Bytes, from::Int, n::Int, a::UInt8, b::UInt8, c::UInt8, d::UInt8)
     va, vb, vc, vd = broadcast8(a), broadcast8(b), broadcast8(c), broadcast8(d)
     at = from
@@ -117,7 +155,26 @@ end
 @inline between_lo(lo::UInt8) = broadcast8(0x80 - lo)
 @inline between_hi(hi::UInt8) = broadcast8(0x7F - hi)
 
-"The first position at or after `from` and before `n` whose byte is from lo to hi (both below 0x80), or -1."
+"""
+The first position at or after `from` and before `n` whose byte is from lo to hi (both below 0x80), or -1: 32 bytes at a
+time by vector compares.
+"""
+function index_between(h::Dense8, from::Int, n::Int, lo::UInt8, hi::UInt8)
+    vl, vw = splat32(lo), splat32(hi - lo)
+    at = from
+    while at <= n - 32
+        m = range_mask(load32(h, at), vl, vw)
+        m != 0 && return at + trailing_zeros(m)
+        at += 32
+    end
+    @inbounds while at < n
+        lo <= h[at+1] <= hi && return at
+        at += 1
+    end
+    return -1
+end
+
+"index_between over any vector of bytes, by SWAR words."
 function index_between(h::Bytes, from::Int, n::Int, lo::UInt8, hi::UInt8)
     vl, vh = between_lo(lo), between_hi(hi)
     at = from
@@ -167,7 +224,23 @@ end
 
 @inline has_zero16(x::UInt64) = (x - ONES16) & ~x & HIGHS16
 
-"The first position at or after `from` and before `n` whose unit is v, or -1."
+"The first position at or after `from` and before `n` whose unit is v, or -1: 16 units at a time by vector compares."
+function index_unit(u::Dense16, from::Int, n::Int, v::UInt16)
+    vv = splat16(v)
+    at = from
+    while at <= n - 16
+        m = eq_mask16(load16(u, at), vv)
+        m != 0 && return at + trailing_zeros(m)
+        at += 16
+    end
+    @inbounds while at < n
+        u[at+1] == v && return at
+        at += 1
+    end
+    return -1
+end
+
+"index_unit over any vector of units, by SWAR words."
 function index_unit(u::Units, from::Int, n::Int, v::UInt16)
     vv = UInt64(v) * ONES16
     at = from

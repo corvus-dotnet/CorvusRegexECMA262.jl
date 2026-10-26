@@ -386,7 +386,61 @@ never misses one: every candidate is compared with the literals.
     return out
 end
 
-function find(f::PairFinder, h::Bytes, from::Int, end_::Int)
+"The lanes of 32 bytes that pass the tests of a position, the masks and values each a byte broadcast."
+@inline function pass32(x::V8x32, m::Vector{UInt64}, v::Vector{UInt64})
+    out = eq_or_mask(x, splat32(m[1] % UInt8), splat32(v[1] % UInt8))
+    @inbounds for k in 2:length(m)
+        out |= eq_or_mask(x, splat32(m[k] % UInt8), splat32(v[k] % UInt8))
+    end
+    return out
+end
+
+"""
+The pair search over a text in memory of its own: 32 starts at a time by vector compares, which flag only the starts
+that pass both positions' tests exactly; the rest as for any vector of bytes.
+"""
+function find(f::PairFinder, h::Dense8, from::Int, end_::Int)
+    last = end_ - f.shortest
+    from > last && return -1, -1
+    at = from
+    # The last start whose two vectors are within the text.
+    blocks = end_ - 32 - max(f.i, f.j)
+    if length(f.mi) == 1 && length(f.mj) == 1
+        mi, vi = splat32(f.mi[1] % UInt8), splat32(f.vi[1] % UInt8)
+        mj, vj = splat32(f.mj[1] % UInt8), splat32(f.vj[1] % UInt8)
+        while at <= blocks
+            m = eq_or_mask(load32(h, at + f.i), mi, vi) & eq_or_mask(load32(h, at + f.j), mj, vj)
+            while m != 0
+                s = at + trailing_zeros(m)
+                if s <= last
+                    e = literal_at(f, h, s, end_)
+                    e >= 0 && return s, e
+                end
+                m &= m - 0x1
+            end
+            at += 32
+        end
+    else
+        while at <= blocks
+            m = pass32(load32(h, at + f.i), f.mi, f.vi) & pass32(load32(h, at + f.j), f.mj, f.vj)
+            while m != 0
+                s = at + trailing_zeros(m)
+                if s <= last
+                    e = literal_at(f, h, s, end_)
+                    e >= 0 && return s, e
+                end
+                m &= m - 0x1
+            end
+            at += 32
+        end
+    end
+    return find_words(f, h, at, end_)
+end
+
+find(f::PairFinder, h::Bytes, from::Int, end_::Int) = find_words(f, h, from, end_)
+
+"The pair search by SWAR words, eight starts at a time, from `from`."
+function find_words(f::PairFinder, h::Bytes, from::Int, end_::Int)
     last = end_ - f.shortest
     from > last && return -1, -1
     at = from
