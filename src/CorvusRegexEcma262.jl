@@ -12,5 +12,6 @@ using .UCD
 include("charset.jl")
 include("fold.jl")
 include("units.jl")
+include("parse.jl")
 
 end
