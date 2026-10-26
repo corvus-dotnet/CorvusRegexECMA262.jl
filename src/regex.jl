@@ -292,19 +292,16 @@ Finds the first match at or after `start` (at `start` alone with `sticky`), with
 where it starts and ends and whether it was found. When `slots` is given it receives the start and end of the match and
 of each group, -1 for a group that did not take part.
 """
-function exec_slots(re::EcmaRegex, input::Text16or8, start::Int, sticky::Bool, slots::Union{Nothing,Vector{Int}})
+function exec_slots(re::EcmaRegex, input::Text16or8, start::Int, sticky::Bool, slots::Union{Nothing,Vector{Int}},
+    held::Union{Nothing,State}=nothing)
     start = normalize(input, max(start, 0), is_unicode(re))
-    slots === nothing && return exec(re.prog, input, start, sticky, re.timeout, nothing)
-    from, to, found = exec_caps(caps_program(re), input, start, sticky, re.timeout, slots)
+    slots === nothing && return exec(re.prog, input, start, sticky, re.timeout, nothing, 1, held)
+    from, to, found = exec(caps_program(re), input, start, sticky, re.timeout, slots, 3, held)
     if found
         slots[1], slots[2] = from, to
     end
     return from, to, found
 end
-
-# The matcher writes the groups after the whole match: slots[3:end].
-exec_caps(p::Program, input::Text16or8, start::Int, sticky::Bool, limit::Int, slots::Vector{Int}) =
-    exec(p, input, start, sticky, limit, slots, 3)
 
 "The position a global search goes on from after a match from..to."
 next_start(re::EcmaRegex, input::Text16or8, from::Int, to::Int) = to == from ? advance(input, to, is_unicode(re)) : to
@@ -313,12 +310,15 @@ next_start(re::EcmaRegex, input::Text16or8, from::Int, to::Int) = to == from ? a
 Each match of a global search, at most `n` (all when `n` is below 0), as its slots: with its groups when `submatch`,
 the bounds of the whole match alone otherwise.
 """
-function find_all(re::EcmaRegex, input::Text16or8, n::Int, submatch::Bool)
+find_all(re::EcmaRegex, input::Text16or8, n::Int, submatch::Bool) =
+    with_state(st -> find_all(re, input, n, submatch, st), re.prog)
+
+function find_all(re::EcmaRegex, input::Text16or8, n::Int, submatch::Bool, st::Union{Nothing,State})
     out = Vector{Int}[]
     at = 0
     while n < 0 || length(out) < n
         slots = submatch ? Vector{Int}(undef, 2 * (re.groups + 1)) : nothing
-        from, to, found = exec_slots(re, input, at, re.flags.sticky, slots)
+        from, to, found = exec_slots(re, input, at, re.flags.sticky, slots, st)
         found || break
         push!(out, slots === nothing ? [from, to] : slots)
         at = next_start(re, input, from, to)
@@ -335,12 +335,16 @@ out_vector(::Units) = UInt16[]
 The text with the first match, or every match with `all`, replaced by the template, as String.prototype.replace does,
 with the template's \$ forms (\$\$, \$&, \$`, \$', \$n, \$nn and \$<name>) replaced. At most `count` matches are replaced.
 """
-function replace_units(re::EcmaRegex, input::Text16or8, template::Text16or8, all::Bool; count::Int=typemax(Int))
+replace_units(re::EcmaRegex, input::Text16or8, template::Text16or8, all::Bool; count::Int=typemax(Int)) =
+    with_state(st -> replace_units(re, input, template, all, count, st), re.prog)
+
+function replace_units(re::EcmaRegex, input::Text16or8, template::Text16or8, all::Bool, count::Int,
+    st::Union{Nothing,State})
     slots = Vector{Int}(undef, 2 * (re.groups + 1))
     out = out_vector(input)
     last, at, any_found, done = 0, 0, false, 0
     while at <= length(input) && done < count
-        from, to, found = exec_slots(re, input, at, re.flags.sticky, slots)
+        from, to, found = exec_slots(re, input, at, re.flags.sticky, slots, st)
         found || break
         any_found = true
         done += 1
@@ -431,19 +435,22 @@ not take part, with at most `limit` items (all when `limit` is below 0). The fla
 with a copy of the pattern that is sticky, from each position in turn, which is what a search from the position finds
 first.
 """
-function split_units(re::EcmaRegex, input::Text16or8, limit::Int)
+split_units(re::EcmaRegex, input::Text16or8, limit::Int) =
+    with_state(st -> split_units(re, input, limit, st), re.prog)
+
+function split_units(re::EcmaRegex, input::Text16or8, limit::Int, st::Union{Nothing,State})
     size = length(input)
     out = Tuple{Int,Int}[]
     limit == 0 && return out
     slots = Vector{Int}(undef, 2 * (re.groups + 1))
     if size == 0
-        _, _, found = exec_slots(re, input, 0, true, slots)
+        _, _, found = exec_slots(re, input, 0, true, slots, st)
         found || push!(out, (0, 0))
         return out
     end
     p, q = 0, 0
     while q < size
-        from, to, found = exec_slots(re, input, q, false, slots)
+        from, to, found = exec_slots(re, input, q, false, slots, st)
         (!found || from >= size) && break
         e = min(to, size)
         if e == p

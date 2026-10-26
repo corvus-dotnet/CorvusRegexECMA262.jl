@@ -35,21 +35,40 @@ each group the program records, or -1 for a group that did not take part. With a
 abandoned when it has run for longer than that, or when its stack has reached MAX_STACK, and the error says which.
 """
 function exec(p::Program, input::Text16or8, start::Int, sticky::Bool, limit::Int, caps::Union{Nothing,Vector{Int}},
-    offset::Int=1)
+    offset::Int=1, held::Union{Nothing,State}=nothing)
     # A pattern of a simple shape with no group is answered by the search alone, with nothing of the matcher's.
     if p.groups == 0 && !sticky && !p.anchored && p.search.shape != SHAPE_NONE
         return shape_search(p, input, start)
     end
-    st = take_state()
+    # A global search holds one state for all its matches (see with_state); a single match takes one from the pool.
+    st = held === nothing ? take_state() : held
     reset!(st, p, length(input), limit)
     from, found = search(p, st, input, start, sticky)
     to = st.end_
     stop = st.stop
     found && caps !== nothing && copyto!(caps, offset, st.caps, 1, length(st.caps))
-    release!(st)
-    give_state(st)
+    if held === nothing
+        release!(st)
+        give_state(st)
+    end
     throw_stop(stop, limit)
     return from, to, found
+end
+
+"""
+f(st) with a state taken from the pool and given back after, for a global search: taking a state and giving it back is
+work for each match that one search of many matches pays once.
+"""
+function with_state(f, p::Program)
+    # A search of a simple shape uses no state (see exec).
+    p.groups == 0 && !p.anchored && p.search.shape != SHAPE_NONE && return f(nothing)
+    st = take_state()
+    try
+        return f(st)
+    finally
+        release!(st)
+        give_state(st)
+    end
 end
 
 function search(p::Program, st::State, input::Text16or8, start::Int, sticky::Bool)

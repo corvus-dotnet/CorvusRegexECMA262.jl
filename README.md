@@ -58,13 +58,12 @@ text that is not UTF-8, and `MatchTimeoutError` or `MatchMemoryError` from a mat
 
 ## Status
 
-Not yet released. The parser, the compiler, the matcher and the crate's search layer (where a match can start, and the
-automata, `docs/port-checklist.md`) are in, and the whole test data passes. The harness of the central benchmark site
-and the first release, 0.1.0, come next.
+0.1.0 is the first release. The parser, the compiler, the matcher and the crate's search layer (where a match can
+start, and the automata, `docs/port-checklist.md`) are in, the whole test data passes, and the central benchmark site
+runs the harness each night. The searches read 32 bytes at a time through vector compares written with `llvmcall`, so
+the package still has no dependency.
 
 ## Installing
-
-Once 0.1.0 is registered:
 
 ```julia
 using Pkg

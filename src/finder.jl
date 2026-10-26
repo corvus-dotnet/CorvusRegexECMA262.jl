@@ -117,20 +117,34 @@ function byte_finder(literals::Vector{Vector{UInt8}}, rank::Vector{Int})::ByteFi
         length(l) == 1 && return OneFinder(l[1])
         # The byte with the least share of text of those rare enough to be searched for alone; the pair search where
         # every byte is common. The share, not BYTE_RANK, chooses: BYTE_RANK ranks Sherlock's k rarest, which the
-        # Sherlock Holmes text holds 3,595 times to its S's 837. memchr reads a vector at a time and the pair search a
-        # word, so any rare byte is searched for alone, as the Java and Go engines do with SWAR.
+        # Sherlock Holmes text holds 3,595 times to its S's 837. memchr and the pair search both read a vector at a
+        # time, so a byte is searched for alone only where it is as rare as a capital S or H, as the Java engine rules
+        # with vectors (VECTOR_ALONE).
         best = rarest_alone(l, rank)
-        best > 0 && return RareFinder(l, best - 1)
+        best > 0 && unit_share(l[best]) <= vector_alone(l) && return RareFinder(l, best - 1)
         p = pair_finder(literals, rank)
         p === nothing || return p
         return table_finder(literals, rank)
     end
     f = firsts_finder(literals, rank)
-    f === nothing || return f
+    if f !== nothing
+        # Where the first bytes are four (Tom|Sawyer|Huckleberry|Finn), the literals' first two bytes tested at once over a
+        # vector of starts turn away the capitals no literal starts with (0.71 to 0.88 of the time); for fewer, the
+        # search for the first bytes alone is faster (Sherlock|Holmes 1.40, Sherlock|Street 3.01 with the pairs).
+        q = f.count == 4 ? prefix_finder(literals, f) : nothing
+        return q === nothing ? f : q
+    end
     p = pair_finder(literals, rank)
     p === nothing || return p
     return table_finder(literals, rank)
 end
+
+"""
+The most share of text (in parts per ten thousand, UNIT_SHARE) the byte a literal is searched for by alone may have: S,
+H and A, not T or I; and for a literal of three bytes or fewer T too, since such a literal is a word as common as its
+capital (nearly every T of the Sherlock Holmes text begins The), so no second position turns starts away.
+"""
+vector_alone(l::Vector{UInt8}) = length(l) <= 3 ? 30 : 25
 
 """
 How common each low byte of the units of UTF-16 literals is in the packed text: an ASCII unit's byte as BYTE_RANK has
@@ -238,7 +252,42 @@ function firsts_finder(literals::Vector{Vector{UInt8}}, rank::Vector{Int})
     return FirstsFinder(best_k, length(v), at(1), at(2), at(3), at(4), 0, 0, by_value)
 end
 
-function find(f::FirstsFinder, h::Bytes, from::Int, end_::Int)
+"""
+The firsts search over a text in memory of its own, for two values or more: the lanes of 32 bytes at the position that
+hold one of the values, found by vector compares, each then compared with its literals without leaving the loop. One
+value is searched for by memchr.
+"""
+function find(f::FirstsFinder, h::Dense8, from::Int, end_::Int)
+    f.count == 1 && return find_each(f, h, from, end_)
+    at = from + f.k
+    va, vb, vc, vd = splat32(f.a), splat32(f.b), splat32(f.c), splat32(f.d)
+    vl, vw = splat32(f.lo), splat32(f.hi - f.lo)
+    while at <= end_ - 32
+        x = load32(h, at)
+        m = if f.count < 0
+            range_mask(x, vl, vw)
+        elseif f.count == 2
+            eq_mask(x, va) | eq_mask(x, vb)
+        else
+            eq_mask(x, va) | eq_mask(x, vb) | eq_mask(x, vc) | eq_mask(x, vd)
+        end
+        while m != 0
+            p = at + trailing_zeros(m)
+            start = p - f.k
+            @inbounds for l in f.by_value[h[p+1]+1]
+                starts_with(h, start, end_, l) && return start, start + length(l)
+            end
+            m &= m - 0x1
+        end
+        at += 32
+    end
+    return find_each(f, h, at - f.k, end_)
+end
+
+find(f::FirstsFinder, h::Bytes, from::Int, end_::Int) = find_each(f, h, from, end_)
+
+"The firsts search a candidate at a time, each found by the search for the values."
+function find_each(f::FirstsFinder, h::Bytes, from::Int, end_::Int)
     at = from + f.k
     while at < end_
         p = if f.count == 1
@@ -386,7 +435,84 @@ never misses one: every candidate is compared with the literals.
     return out
 end
 
-function find(f::PairFinder, h::Bytes, from::Int, end_::Int)
+"""
+The tests of a position as four masks and four values, each a byte broadcast over a vector, the last test repeated where
+there are fewer: a test made twice passes the same lanes, so the four are made without a branch.
+"""
+function tests32(m::Vector{UInt64}, v::Vector{UInt64})
+    at(k) = min(k, length(m))
+    return ntuple(k -> splat32(m[at(k)] % UInt8), Val(4)), ntuple(k -> splat32(v[at(k)] % UInt8), Val(4))
+end
+
+"The lanes of 32 bytes that pass one of a position's four tests."
+@inline function pass32(x::V8x32, (m, v)::Tuple{NTuple{4,V8x32},NTuple{4,V8x32}})
+    return eq_or_mask(x, m[1], v[1]) | eq_or_mask(x, m[2], v[2]) | eq_or_mask(x, m[3], v[3]) | eq_or_mask(x, m[4], v[4])
+end
+
+"""
+The pair search over a text in memory of its own: 32 starts at a time by vector compares, which flag only the starts
+that pass both positions' tests exactly; the rest as for any vector of bytes.
+"""
+function find(f::PairFinder, h::Dense8, from::Int, end_::Int)
+    last = end_ - f.shortest
+    from > last && return -1, -1
+    at = from
+    # The last start whose two vectors are within the text.
+    blocks = end_ - 32 - max(f.i, f.j)
+    if length(f.mi) == 1 && length(f.mj) == 1
+        mi, vi = splat32(f.mi[1] % UInt8), splat32(f.vi[1] % UInt8)
+        mj, vj = splat32(f.mj[1] % UInt8), splat32(f.vj[1] % UInt8)
+        # Two vectors of starts at a time, so that the loop's branch is taken once in 64 starts.
+        while at <= blocks - 32
+            m0 = pair_mask(load32(h, at + f.i), mi, vi, load32(h, at + f.j), mj, vj)
+            m1 = pair_mask(load32(h, at + 32 + f.i), mi, vi, load32(h, at + 32 + f.j), mj, vj)
+            if m0 | m1 != 0
+                m = UInt64(m1) << 32 | m0
+                while m != 0
+                    s = at + trailing_zeros(m)
+                    if s <= last
+                        e = literal_at(f, h, s, end_)
+                        e >= 0 && return s, e
+                    end
+                    m &= m - 0x1
+                end
+            end
+            at += 64
+        end
+        while at <= blocks
+            m = pair_mask(load32(h, at + f.i), mi, vi, load32(h, at + f.j), mj, vj)
+            while m != 0
+                s = at + trailing_zeros(m)
+                if s <= last
+                    e = literal_at(f, h, s, end_)
+                    e >= 0 && return s, e
+                end
+                m &= m - 0x1
+            end
+            at += 32
+        end
+    else
+        ti, tj = tests32(f.mi, f.vi), tests32(f.mj, f.vj)
+        while at <= blocks
+            m = pass32(load32(h, at + f.i), ti) & pass32(load32(h, at + f.j), tj)
+            while m != 0
+                s = at + trailing_zeros(m)
+                if s <= last
+                    e = literal_at(f, h, s, end_)
+                    e >= 0 && return s, e
+                end
+                m &= m - 0x1
+            end
+            at += 32
+        end
+    end
+    return find_words(f, h, at, end_)
+end
+
+find(f::PairFinder, h::Bytes, from::Int, end_::Int) = find_words(f, h, from, end_)
+
+"The pair search by SWAR words, eight starts at a time, from `from`."
+function find_words(f::PairFinder, h::Bytes, from::Int, end_::Int)
     last = end_ - f.shortest
     from > last && return -1, -1
     at = from
@@ -478,8 +604,54 @@ made to its method directly and its answer is not boxed, as a call chosen when t
 """
 @inline function find_any(f::ByteFinder, h::Bytes, from::Int, end_::Int)
     f isa RareFinder && return find(f, h, from, end_)
+    f isa PrefixFinder && return find(f, h, from, end_)
     f isa PairFinder && return find(f, h, from, end_)
     f isa FirstsFinder && return find(f, h, from, end_)
     f isa OneFinder && return find(f, h, from, end_)
     return find(f::TableFinder, h, from, end_)
+end
+
+
+# The most pairs of first bytes the prefix search tests.
+const PREFIX_PAIRS = 4
+
+"""
+A few literals found by their first two bytes, each pair tested at once over 32 starts with vector compares (the Java
+engine's Prefixes, which it takes with the Vector API): the starts found are the literals' first two bytes, each then
+compared with the literals in order. Over a text not in memory of its own, the firsts search.
+"""
+struct PrefixFinder <: ByteFinder
+    firsts::FirstsFinder
+    literals::Vector{Vector{UInt8}}
+    pairs::Vector{NTuple{2,UInt8}}
+end
+
+function prefix_finder(literals::Vector{Vector{UInt8}}, f::FirstsFinder)
+    (f.k != 0 || any(l -> length(l) < 2, literals)) && return nothing
+    pairs = unique([(l[1], l[2]) for l in literals])
+    length(pairs) > PREFIX_PAIRS && return nothing
+    return PrefixFinder(f, literals, pairs)
+end
+
+find(f::PrefixFinder, h::Bytes, from::Int, end_::Int) = find(f.firsts, h, from, end_)
+
+function find(f::PrefixFinder, h::Dense8, from::Int, end_::Int)
+    at = from
+    pairs = f.pairs
+    while at <= end_ - 33
+        x0, x1 = load32(h, at), load32(h, at + 1)
+        m = UInt32(0)
+        for (a, b) in pairs
+            m |= eq_mask(x0, splat32(a)) & eq_mask(x1, splat32(b))
+        end
+        while m != 0
+            s = at + trailing_zeros(m)
+            for l in f.literals
+                starts_with(h, s, end_, l) && return s, s + length(l)
+            end
+            m &= m - 0x1
+        end
+        at += 32
+    end
+    return find(f.firsts, h, at, end_)
 end
