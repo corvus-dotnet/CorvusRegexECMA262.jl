@@ -131,6 +131,11 @@ mutable struct EcmaRegex <: AbstractPattern
     names::Vector{GroupInfoName}
     # The time each match may take, in nanoseconds; 0 for no limit.
     timeout::Int
+    # The pattern needs no backtracking and is small enough for a linear matcher (re2_cost), so a test from the start
+    # of a text can be answered by the automaton over ASCII (see dfa.jl): `missing` until the first such test builds it,
+    # then the automaton or `nothing` for none.
+    regular::Bool
+    @atomic dfa::Union{Missing,Nothing,Dfa}
 end
 
 function EcmaRegex(pattern::AbstractString, flags::AbstractString=""; match_timeout::Union{Nothing,Real}=default_match_timeout())
@@ -149,8 +154,9 @@ function EcmaRegex(pattern::AbstractString, flags::Flags; match_timeout::Union{N
     names = [GroupInfoName(String(Char.(n.name)), transcode(UInt16, String(Char.(n.name))), n.groups)
              for n in group_names(ps)]
     timeout = match_timeout === nothing ? 0 : max(round(Int, match_timeout * 1e9), 0)
+    regular = !ps.needs_backtracking && re2_cost(root) <= MAX_RE2_COST
     prog = compile_program(root, flags.unicode || flags.unicode_sets, -1)
-    return EcmaRegex(pattern, flags, prog, nothing, ps.groups, names, timeout)
+    return EcmaRegex(pattern, flags, prog, nothing, ps.groups, names, timeout, regular, missing)
 end
 
 """
@@ -216,6 +222,31 @@ end
 is_unicode(re::EcmaRegex) = re.flags.unicode || re.flags.unicode_sets
 
 const CAPS_LOCK = ReentrantLock()
+
+"The automaton over ASCII of a regular pattern, or `nothing` when it has none."
+function automaton(re::EcmaRegex)
+    d = @atomic re.dfa
+    d === missing || return d
+    root, _ = parse_with(re.pattern, syntax(re.flags))
+    built = build_dfa(root)
+    @atomic re.dfa = built
+    return built
+end
+
+"""
+Whether the pattern matches at or after `start` (at `start` alone with the y flag): from the start of an ASCII text by
+the automaton where the pattern has one, and otherwise by the matcher.
+"""
+function test(re::EcmaRegex, input::Text16or8, start::Int)
+    if start == 0 && !re.flags.sticky && re.regular
+        d = automaton(re)
+        if d !== nothing
+            matched, decided = is_match(d, input)
+            decided && return matched
+        end
+    end
+    return exec_slots(re, input, start, re.flags.sticky, nothing)[3]
+end
 
 "The program that records every group."
 function caps_program(re::EcmaRegex)::Program

@@ -26,6 +26,7 @@ include("parse.jl")
 include("compile.jl")
 include("vm.jl")
 include("matcher.jl")
+include("dfa.jl")
 include("regex.jl")
 include("api.jl")
 

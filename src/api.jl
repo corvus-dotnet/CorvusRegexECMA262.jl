@@ -130,7 +130,7 @@ Whether the pattern matches the text: a string (checked to be UTF-8), a Utf8Text
 y flag the match must start at the start.
 """
 function occursin_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes})
-    return exec_slots(re, checked_units(s), 0, re.flags.sticky, nothing)[3]
+    return test(re, checked_units(s), 0)
 end
 
 """
