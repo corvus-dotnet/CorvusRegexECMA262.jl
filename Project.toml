@@ -1,0 +1,13 @@
+name = "CorvusRegexEcma262"
+uuid = "326d20a7-0de9-4590-a406-03b1785a0ae5"
+authors = ["Endjin Limited"]
+version = "0.0.0"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
