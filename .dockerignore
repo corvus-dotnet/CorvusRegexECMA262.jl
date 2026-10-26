@@ -1,0 +1,4 @@
+Manifest.toml
+.git
+target/
+wrong-cases*.tsv

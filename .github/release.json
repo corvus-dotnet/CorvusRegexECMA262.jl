@@ -17,6 +17,16 @@
           "count": 1
         }
       ]
+    },
+    {
+      "name": "harness",
+      "harnessOf": "CorvusRegexEcma262",
+      "tag": "harness-",
+      "paths": [
+        "Dockerfile",
+        "tools/benchmarks/",
+        "tools/dataset/"
+      ]
     }
   ]
 }

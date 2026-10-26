@@ -73,6 +73,19 @@ Pkg.add("CorvusRegexEcma262")
 
 The package has no dependency.
 
+## Benchmarks
+
+The [central benchmark site](https://corvus-oss.org/corvus-regex-ecma262-benchmarks/) runs this repository's harness
+image, `ghcr.io/corvus-dotnet/corvus-regex-ecma262-jl`, each night beside the engines of every other source: this
+package over UTF-8 and UTF-16, Julia's `Base.Regex` (PCRE2, which does not claim ECMA-262) and V8, over the Industry
+workloads of dotnet/performance, with each ECMA-262 engine's compliance over the test data. This repository publishes
+no figures of its own. `tools/benchmarks/run.sh <workloads.json> <texts> <out.json>` runs the same harness anywhere (see
+the script for what it needs).
+
+Each figure is a Julia process of its own. The package runs a small workload while it is precompiled
+(`src/precompile.jl`), so that the code a program's first pattern and match run is compiled already; a figure's process
+starts in about two seconds rather than nine.
+
 ## Building and testing
 
 ```
