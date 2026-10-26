@@ -1,0 +1,112 @@
+# Registers a release in Julia's General registry. auto-release.yml makes the release: a tag v<version> on a commit of
+# the merge with the version written into Project.toml (tools/release/stamp.ps1), since main keeps 0.0.0. This asks
+# JuliaRegistrator to register that commit, with a comment on it, and waits for General to list the version. A new
+# package waits three days in General's queue: the workflow then says so and ends, and a run after General has merged
+# it finds the version listed and has nothing to do. The JuliaRegistrator app (https://github.com/apps/juliateam-registrator)
+# must be installed on the repository (README.md, Releasing).
+name: julia-publish
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release's tag (v<version>)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: julia-publish
+  cancel-in-progress: false
+
+env:
+  PACKAGE: CorvusRegexEcma262
+  REGISTRY: JuliaRegistries/General
+  REGISTRY_PATH: C/CorvusRegexEcma262
+
+jobs:
+  register:
+    name: Register ${{ github.event.release.tag_name || inputs.tag }}
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: write  # comment on the commit
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ github.event.release.tag_name || inputs.tag }}
+        persist-credentials: false
+    - name: The tag's version is in Project.toml
+      id: version
+      run: |
+        version="${TAG#v}"
+        grep -qxF "version = \"$version\"" Project.toml \
+          || { echo "::error::Project.toml at $TAG does not have version = \"$version\"."; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+    - name: Ask JuliaRegistrator, and wait for General to list the version
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ steps.version.outputs.version }}
+        COMMIT: ${{ steps.version.outputs.commit }}
+      run: |
+        listed() {
+          gh api "repos/$REGISTRY/contents/$REGISTRY_PATH/Versions.toml" -H "Accept: application/vnd.github.raw+json" \
+            2> /dev/null | grep -qxF "[\"$VERSION\"]"
+        }
+        if listed; then
+          echo "::notice::$PACKAGE $VERSION is registered; nothing to do."
+          exit 0
+        fi
+        new_package=false
+        gh api "repos/$REGISTRY/contents/$REGISTRY_PATH/Package.toml" > /dev/null 2>&1 || new_package=true
+
+        notes=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .body)
+        printf '@JuliaRegistrator register\n\nRelease notes:\n\n%s\n' "$notes" > "$RUNNER_TEMP/comment.md"
+        comment=$(gh api "repos/$GITHUB_REPOSITORY/commits/$COMMIT/comments" -F body=@"$RUNNER_TEMP/comment.md" --jq .id)
+        echo "Commented on $COMMIT (comment $comment)."
+        answer=""
+        for attempt in $(seq 1 60); do
+          sleep 10
+          answer=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$COMMIT/comments" \
+            --jq "[.[] | select(.user.login == \"JuliaRegistrator\" and .id > $comment)][0].body // empty")
+          [ -n "$answer" ] && break
+          echo "No answer from JuliaRegistrator yet (attempt $attempt)."
+        done
+        if [ -z "$answer" ]; then
+          echo "::error::JuliaRegistrator did not answer the comment on $COMMIT in 10 minutes. Is its GitHub App installed on this repository?"
+          exit 1
+        fi
+        pull_request=$(printf '%s\n' "$answer" | grep -o "https://github.com/$REGISTRY/pull/[0-9]*" | head -n 1)
+        if [ -z "$pull_request" ]; then
+          { echo "### JuliaRegistrator refused $PACKAGE $VERSION"; echo; printf '%s\n' "$answer"; } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::JuliaRegistrator did not open a pull request: $(printf '%s' "$answer" | head -n 1)"
+          exit 1
+        fi
+        echo "JuliaRegistrator answered: $pull_request"
+        if [ "$new_package" = true ]; then
+          {
+            echo "### $PACKAGE $VERSION: the registration is asked for"
+            echo
+            echo "This is the package's first version. The General registry merges a new package no sooner than"
+            echo "3 days after its pull request opens, and people may comment on it in that time: subscribe to"
+            echo "$pull_request and answer what is asked there."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::$PACKAGE $VERSION is a new package: $pull_request merges in 3 days at the soonest."
+          exit 0
+        fi
+        for attempt in $(seq 1 75); do
+          if listed; then
+            echo "The registry lists $VERSION."
+            exit 0
+          fi
+          echo "The registry does not list $VERSION yet (attempt $attempt)."
+          sleep 60
+        done
+        echo "::error::The General registry did not merge $pull_request in 75 minutes. See its checks, and run this workflow again when it has merged."
+        exit 1

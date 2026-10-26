@@ -25,7 +25,7 @@ const Text16or8 = Union{Bytes,Units}
 
 # What a byte that is not UTF-8 decodes to, one byte at a time. The public API refuses text that is not UTF-8, so the
 # matcher only meets it in a text the caller vouched for.
-const RUNE_ERROR = 0xFFFD
+const RUNE_ERROR = 0xFFFD % Int
 # The first byte value that is not a character by itself.
 const RUNE_SELF = 0x80
 

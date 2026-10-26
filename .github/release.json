@@ -1,0 +1,22 @@
+{
+  "packages": [
+    {
+      "name": "CorvusRegexEcma262",
+      "tag": "v",
+      "stampedTag": true,
+      "nextVersion": "0.1.0",
+      "paths": [
+        "Project.toml",
+        "src/"
+      ],
+      "stamp": [
+        {
+          "file": "Project.toml",
+          "placeholder": "version = \"0.0.0\"",
+          "with": "version = \"{version}\"",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}

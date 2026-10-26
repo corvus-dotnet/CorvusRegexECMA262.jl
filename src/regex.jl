@@ -218,17 +218,24 @@ is_unicode(re::EcmaRegex) = re.flags.unicode || re.flags.unicode_sets
 const CAPS_LOCK = ReentrantLock()
 
 "The program that records every group."
-function caps_program(re::EcmaRegex)
+function caps_program(re::EcmaRegex)::Program
     re.prog.groups == re.groups && return re.prog
     caps = @atomic re.caps
     caps === nothing || return caps
-    lock(CAPS_LOCK) do
+    return build_caps(re)
+end
+
+@noinline function build_caps(re::EcmaRegex)
+    lock(CAPS_LOCK)
+    try
         caps = @atomic re.caps
         caps === nothing || return caps
         root, _ = parse_with(re.pattern, syntax(re.flags))
-        caps = compile_program(root, is_unicode(re), re.groups)
-        @atomic re.caps = caps
-        return caps
+        built = compile_program(root, is_unicode(re), re.groups)
+        @atomic re.caps = built
+        return built
+    finally
+        unlock(CAPS_LOCK)
     end
 end
 

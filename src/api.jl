@@ -18,6 +18,8 @@ struct Utf8Text
     end
 end
 
+Utf8Text(b::Bytes) = Utf8Text(String(copy(b)))
+
 Base.String(t::Utf8Text) = t.s
 Base.length(t::Utf8Text) = ncodeunits(t.s)
 
@@ -35,11 +37,16 @@ function checked_units(s::AbstractString)
 end
 checked_units(t::Utf8Text) = codeunits(t.s)
 checked_units(u::Units) = u
+function checked_units(b::Bytes)
+    isvalid(String, b) || throw(NOT_UTF8)
+    return b
+end
 
 # What a match of a subject reports its pieces as: a SubString of a string, a view of a vector of UTF-16 code units.
 piece(s::AbstractString, from::Int, to::Int) = piece8(utf8_string(s), from, to)
 piece(t::Utf8Text, from::Int, to::Int) = piece8(t.s, from, to)
 piece(u::Units, from::Int, to::Int) = view(u, from+1:to)
+piece(b::Bytes, from::Int, to::Int) = view(b, from+1:to)
 
 """
 s[from:to) as a SubString, or one of a copy with U+FFFD for a half character at a bound between the halves of a
@@ -49,7 +56,7 @@ function piece8(s::Subject8, from::Int, to::Int)
     b = codeunits(s)
     if inside_four(b, from) || to < length(b) && inside_four(b, to)
         out = String(push_lossy!(UInt8[], b, from, to))
-        return SubString(out, 1, ncodeunits(out))
+        return SubString(out)
     end
     return SubString(s, from + 1, prevind(s, to + 1))
 end
@@ -57,6 +64,7 @@ end
 piece_type(::AbstractString) = SubString{String}
 piece_type(::Utf8Text) = SubString{String}
 piece_type(u::Units) = typeof(view(u, 1:0))
+piece_type(b::Bytes) = typeof(view(b, 1:0))
 
 """
     EcmaMatch
@@ -121,7 +129,7 @@ start_of(i::Integer) = Int(i) - 1
 Whether the pattern matches the text: a string (checked to be UTF-8), a Utf8Text, or a vector of UTF-16 code units. With the
 y flag the match must start at the start.
 """
-function occursin_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units})
+function occursin_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes})
     return exec_slots(re, checked_units(s), 0, re.flags.sticky, nothing)[3]
 end
 
@@ -130,7 +138,7 @@ end
 
 The first match at or after index `i` (at `i` alone with the y flag), or `nothing`.
 """
-function match_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units}, i::Integer)
+function match_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes}, i::Integer)
     units = checked_units(s)
     slots = Vector{Int}(undef, 2 * (re.groups + 1))
     exec_slots(re, units, start_of(i), re.flags.sticky, slots)[3] || return nothing
@@ -142,7 +150,7 @@ end
 
 The code units of the first match at or after index `i`, as a range, or `nothing`.
 """
-function findnext_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units}, i::Integer)
+function findnext_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes}, i::Integer)
     from, to, found = exec_slots(re, checked_units(s), start_of(i), re.flags.sticky, nothing)
     return found ? (from+1:to) : nothing
 end
@@ -162,12 +170,12 @@ end
 
 The matches of a global search of the text, each an EcmaMatch, as String.prototype.matchAll gives them.
 """
-eachmatch_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units}) = EcmaMatches(re, (checked_units(s); s))
+eachmatch_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes}) = EcmaMatches(re, (checked_units(s); s))
 
 Base.IteratorSize(::Type{<:EcmaMatches}) = Base.SizeUnknown()
 Base.eltype(::Type{EcmaMatches{T}}) where {T} = EcmaMatch{piece_type_of(T)}
 piece_type_of(::Type{<:Union{AbstractString,Utf8Text}}) = SubString{String}
-piece_type_of(::Type{T}) where {T<:Units} = typeof(view(T(undef, 0), 1:0))
+piece_type_of(::Type{T}) where {T<:Union{Units,Bytes}} = Base.promote_op(view, T, UnitRange{Int})
 
 function Base.iterate(m::EcmaMatches, at::Int=0)
     units = subject_units(m.subject)
@@ -180,7 +188,7 @@ end
 
 # Each verb has a method for each kind of subject, which Base's own methods (on a union of patterns and strings) would
 # otherwise make ambiguous.
-for T in (:AbstractString, :Utf8Text, :Units)
+for T in (:AbstractString, :Utf8Text, :Units, :Bytes)
     @eval begin
         Base.occursin(re::EcmaRegex, s::$T) = occursin_impl(re, s)
         Base.match(re::EcmaRegex, s::$T, i::Integer=1) = match_impl(re, s, i)
@@ -195,13 +203,14 @@ end
 subject_units(s::AbstractString) = codeunits(utf8_string(s))
 subject_units(t::Utf8Text) = codeunits(t.s)
 subject_units(u::Units) = u
+subject_units(b::Bytes) = b
 
 """
     findall(re::EcmaRegex, s)
 
 The code units of each match of a global search, as ranges.
 """
-function findall_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units})
+function findall_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes})
     return [b[1]+1:b[2] for b in find_all(re, checked_units(s), -1, false)]
 end
 
@@ -210,7 +219,7 @@ end
 
 The number of matches of a global search of the text.
 """
-function count_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units})
+function count_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes})
     units = checked_units(s)
     n, at = 0, 0
     while at <= length(units)
@@ -245,6 +254,12 @@ function Base.replace(u::Units, pat::Pair{EcmaRegex,<:Units}; count::Integer=typ
     re, template = pat
     out = replace_units(re, u, template, true; count=Int(count))
     return out === nothing ? Vector{UInt16}(u) : out
+end
+
+function Base.replace(b::Bytes, pat::Pair{EcmaRegex,<:Bytes}; count::Integer=typemax(Int))
+    re, template = pat
+    out = replace_units(re, checked_units(b), checked_units(template), true; count=Int(count))
+    return out === nothing ? Vector{UInt8}(b) : out
 end
 
 """
@@ -289,7 +304,7 @@ end
 The text split around the matches as String.prototype.split splits it: the pieces, with the groups of each match
 between them (`nothing` for a group that did not take part), at most `limit` items (all when it is below 0).
 """
-function ecmasplit(s::Union{AbstractString,Utf8Text,Units}, re::EcmaRegex; limit::Integer=-1)
+function ecmasplit(s::Union{AbstractString,Utf8Text,Units,Bytes}, re::EcmaRegex; limit::Integer=-1)
     S = piece_type(s)
     out = Union{Nothing,S}[]
     for (from, to) in split_units(re, checked_units(s), Int(limit))
@@ -319,7 +334,7 @@ Captures(re::EcmaRegex) = Captures(re, Vector{Int}(undef, 2 * (re.groups + 1)), 
 Finds the first match at or after index `i` of the text into the Captures, and reports whether there was one. It
 allocates nothing once the working memory has grown.
 """
-function match!(c::Captures, s::Union{AbstractString,Utf8Text,Units}, i::Integer=1)
+function match!(c::Captures, s::Union{AbstractString,Utf8Text,Units,Bytes}, i::Integer=1)
     c.found = exec_slots(c.re, checked_units(s), start_of(i), c.re.flags.sticky, c.slots)[3]
     return c.found
 end
