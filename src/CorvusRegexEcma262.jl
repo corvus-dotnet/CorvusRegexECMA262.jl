@@ -36,6 +36,7 @@ include("matcher.jl")
 include("dfa.jl")
 include("regex.jl")
 include("api.jl")
+include("precompile.jl")
 
 function __init__()
     MEMO_FROM_THE_START[] = get(ENV, "CORVUS_REGEX_MEMO_FROM_THE_START", "") == "1"

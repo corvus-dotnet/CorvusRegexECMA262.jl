@@ -66,6 +66,13 @@ jobs:
         if (-not (Select-String -Path Project.toml -SimpleMatch 'version = "99.98.97"' -Quiet)) { throw 'the version was not stamped' }
         julia --startup-file=no --project=. -e 'using CorvusRegexEcma262; v = pkgversion(CorvusRegexEcma262); v == v"99.98.97" || error("pkgversion is $v")'
         git checkout -- Project.toml
+    - name: The benchmark harness's scripts read
+      # The harness itself runs in the harness-image workflow; here its scripts are parsed on every Julia.
+      if: runner.os == 'Linux'
+      run: |
+        julia --startup-file=no -e 'for f in ("tools/benchmarks/industry.jl", "tools/dataset/run.jl", "tools/stackprobe/run.jl"); any(e -> e isa Expr && e.head in (:error, :incomplete), Meta.parseall(read(f, String); filename=f).args) && error("$f does not parse"); end'
+        python3 -m py_compile tools/benchmarks/industry-results.py tools/benchmarks/count-gate.py tools/benchmarks/v8/workloads.py
+        bash -n tools/benchmarks/run.sh tools/benchmarks/build.sh tools/benchmarks/container-entry.sh
     - name: Probe for stack overflows
       # Deep, wide and long patterns in every grammar through every verb, each in a task with a stack of 4 MB (Julia's
       # default) and of 2 MB: none may overflow it (tools/stackprobe).
