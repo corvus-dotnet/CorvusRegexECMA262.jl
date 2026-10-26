@@ -162,7 +162,7 @@ end
 """
     isvalid_pattern(pattern, flags = "")
 
-Whether a pattern is valid with the flags.
+Whether a pattern is valid with the flags and within the limits of size.
 """
 function isvalid_pattern(pattern::AbstractString, flags::AbstractString="")
     f = try
@@ -175,7 +175,7 @@ function isvalid_pattern(pattern::AbstractString, flags::AbstractString="")
         parse_with(pattern, syntax(f))
         return true
     catch e
-        e isa SyntaxError && return false
+        (e isa SyntaxError || e isa TooLargeError) && return false
         rethrow()
     end
 end
