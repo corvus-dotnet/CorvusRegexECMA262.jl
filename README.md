@@ -20,6 +20,12 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
   a match timeout, as a `Regex` of .NET can, which bounds the time and the backtracking memory of every match. With a
   timeout and the package's limits of pattern size, neither a pattern nor a text from outside can make a program hang.
   `set_default_match_timeout!` gives every pattern one.
+- The search layer of the crate: literals found by their rarest bytes, the windows of an alternation, the search after
+  loops, the shapes answered without the matcher, and automata over ASCII for where a match starts and ends
+  (`docs/port-checklist.md`). A global search through `eachmatch!` into a `Captures` allocates nothing.
+- The matcher keeps its choices on a stack of its own; reading a deeply nested pattern recurses on the task's stack.
+  The package needs 2 MB of it at most (`tools/stackprobe`), and Julia gives a task 4 MB; on a smaller stack a deep
+  pattern throws a `StackOverflowError`.
 
 **Compliance.** Over the [ECMA-262 test data](https://github.com/corvus-dotnet/ecma262-regex-test-data) (what V8 says
 about its patterns and texts, test262's patterns and `exec` calls, the global search, `replace` and `split` among them,
@@ -52,9 +58,9 @@ text that is not UTF-8, and `MatchTimeoutError` or `MatchMemoryError` from a mat
 
 ## Status
 
-Not yet released. The parser, the compiler and the matcher are in, and the whole test data passes. The crate's search
-layer (where a match can start, and the automata), the harness of the central benchmark site and the first release,
-0.1.0, come next.
+Not yet released. The parser, the compiler, the matcher and the crate's search layer (where a match can start, and the
+automata, `docs/port-checklist.md`) are in, and the whole test data passes. The harness of the central benchmark site
+and the first release, 0.1.0, come next.
 
 ## Installing
 
@@ -72,6 +78,7 @@ The package has no dependency.
 ```
 julia --project=. -e 'using Pkg; Pkg.test()'
 julia --project=. -t 4 tools/dataset/run.jl <ecma262-regex-test-data>/data wrong-cases.tsv
+julia --project=. tools/stackprobe/run.jl
 ```
 
 `CORVUS_REGEX_MEMO_FROM_THE_START=1` makes every match take its memory of failed places from its first step, which CI

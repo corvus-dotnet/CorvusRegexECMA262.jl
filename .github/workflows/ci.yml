@@ -66,6 +66,10 @@ jobs:
         if (-not (Select-String -Path Project.toml -SimpleMatch 'version = "99.98.97"' -Quiet)) { throw 'the version was not stamped' }
         julia --startup-file=no --project=. -e 'using CorvusRegexEcma262; v = pkgversion(CorvusRegexEcma262); v == v"99.98.97" || error("pkgversion is $v")'
         git checkout -- Project.toml
+    - name: Probe for stack overflows
+      # Deep, wide and long patterns in every grammar through every verb, each in a task with a stack of 4 MB (Julia's
+      # default) and of 2 MB: none may overflow it (tools/stackprobe).
+      run: julia --startup-file=no --project=. tools/stackprobe/run.jl
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         repository: corvus-dotnet/ecma262-regex-test-data

@@ -130,7 +130,7 @@ Whether the pattern matches the text: a string (checked to be UTF-8), a Utf8Text
 y flag the match must start at the start.
 """
 function occursin_impl(re::EcmaRegex, s::Union{AbstractString,Utf8Text,Units,Bytes})
-    return exec_slots(re, checked_units(s), 0, re.flags.sticky, nothing)[3]
+    return test(re, checked_units(s), 0)
 end
 
 """
@@ -352,4 +352,41 @@ function capture_range(c::Captures, g::Integer=0)
     c.found || return nothing
     from, to = c.slots[2g+1], c.slots[2g+2]
     return from == NONE ? nothing : (from+1:to)
+end
+
+"The matches of a global search into one Captures (see eachmatch!)."
+struct CapturesMatches{T}
+    c::Captures
+    subject::T
+end
+
+"""
+    eachmatch!(c::Captures, s)
+
+The matches of a global search of the text, as String.prototype.matchAll gives them, each read into the Captures,
+which the iteration yields every time: a global search that allocates nothing once the working memory has grown.
+
+    c = Captures(re)
+    for m in eachmatch!(c, text)
+        r = capture_range(m, 1)
+    end
+"""
+eachmatch!(c::Captures, s::Union{AbstractString,Utf8Text,Units,Bytes}) = CapturesMatches(c, (checked_units(s); s))
+
+Base.IteratorSize(::Type{<:CapturesMatches}) = Base.SizeUnknown()
+Base.eltype(::Type{<:CapturesMatches}) = Captures
+
+# Inlined, so that the loop over it keeps the pair it returns (which holds the Captures) in registers: returned from a
+# call, a pair that holds a reference is boxed.
+@inline function Base.iterate(m::CapturesMatches, at::Int=0)
+    c = m.c
+    units = subject_units(m.subject)
+    if at > length(units)
+        c.found = false
+        return nothing
+    end
+    from, to, found = exec_slots(c.re, units, at, c.re.flags.sticky, c.slots)
+    c.found = found
+    found || return nothing
+    return c, next_start(c.re, units, from, to)
 end
