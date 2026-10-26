@@ -14,7 +14,7 @@ compile.rs, and so on), held to the same ECMA-262 test data.
 """
 module CorvusRegexEcma262
 
-export EcmaRegex, @ecma_str, EcmaMatch, Utf8Text, Captures, match!, capture_range, ecmasplit
+export EcmaRegex, @ecma_str, EcmaMatch, Utf8Text, Captures, match!, eachmatch!, capture_range, ecmasplit
 
 include("ucd/UCD.jl")
 using .UCD
@@ -23,7 +23,14 @@ include("charset.jl")
 include("fold.jl")
 include("units.jl")
 include("parse.jl")
+include("swar.jl")
+include("finder.jl")
+include("literals.jl")
+include("adfa.jl")
+include("search.jl")
 include("compile.jl")
+include("automata.jl")
+include("searchunits.jl")
 include("vm.jl")
 include("matcher.jl")
 include("dfa.jl")

@@ -165,3 +165,5 @@ end
     @test match(re, Vector{UInt8}("abbc")).match == Vector{UInt8}("bb")
 end
 include("dfa.jl")
+include("search.jl")
+include("alloc.jl")

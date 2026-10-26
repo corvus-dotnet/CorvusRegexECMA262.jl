@@ -303,18 +303,8 @@ function exec_slots(re::EcmaRegex, input::Text16or8, start::Int, sticky::Bool, s
 end
 
 # The matcher writes the groups after the whole match: slots[3:end].
-function exec_caps(p::Program, input::Text16or8, start::Int, sticky::Bool, limit::Int, slots::Vector{Int})
-    st = take_state()
-    reset!(st, p, length(input), limit)
-    from, found = search(p, st, input, start, sticky)
-    to = st.end_
-    stop = st.stop
-    found && copyto!(slots, 3, st.caps, 1, length(st.caps))
-    release!(st)
-    give_state(st)
-    throw_stop(stop, limit)
-    return from, to, found
-end
+exec_caps(p::Program, input::Text16or8, start::Int, sticky::Bool, limit::Int, slots::Vector{Int}) =
+    exec(p, input, start, sticky, limit, slots, 3)
 
 "The position a global search goes on from after a match from..to."
 next_start(re::EcmaRegex, input::Text16or8, from::Int, to::Int) = to == from ? advance(input, to, is_unicode(re)) : to

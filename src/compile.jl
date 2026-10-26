@@ -197,6 +197,40 @@ mutable struct Program
     quick::Vector{Quick}
     # Every code point a match can start with, or nothing when a match can be empty or when the set is not known.
     first::Union{Nothing,CharSet}
+    # How the search finds where a match can start (see search.jl).
+    search::Search
+    # The anchored automaton that finds where a match from a start ends, for a program that records no group and needs
+    # no backtracking (see adfa.jl).
+    anchored_dfa::Union{Nothing,AnchoredDfa}
+    # The tree of a pattern whose search tries every start its first set allows, from which the forward automaton (see
+    # build_forward_dfa) is built on the first search that wants it: `missing` until then, then the automaton or
+    # nothing.
+    forward_root::Union{Nothing,Node}
+    @atomic forward_dfa::Union{Missing,Nothing,AnchoredDfa}
+    # For the same patterns, the window of positions read one unit at a time before the first set is searched for (see
+    # SkipWin).
+    skip::Union{Nothing,SkipWin}
+    # For a pattern every match of which starts with one literal (a window at distance 0 of one literal over UTF-8), the
+    # anchored automaton's states after it (see after), and its length: an occurrence goes on from there, its units not
+    # read again.
+    after_literal::Union{Nothing,NTuple{4,UInt32}}
+    after_length::Int
+end
+
+"The forward automaton, built on the first search that wants it, or nothing when there is none."
+function forward(p::Program)
+    p.forward_root === nothing && return nothing
+    d = @atomic p.forward_dfa
+    d === missing || return d
+    built = build_forward_dfa(p.forward_root)
+    @atomic p.forward_dfa = built
+    return built
+end
+
+"Whether a tree nests fewer than `limit` levels."
+function shallower_than(n::Node, limit::Int)
+    limit <= 0 && return false
+    return all(s -> shallower_than(s, limit - 1), n.subs)
 end
 
 "The least number of units of the text a match consumes."
@@ -247,13 +281,31 @@ function compile_program(root::Node, unicode::Bool, groups::Int)
     q = set_quick(insts)
     set_back!(insts, q)
     anchored = starts_at_bol(root)
+    groups_kept = length(c.tracked)
+    backrefs = !isempty(referenced)
+    anchored_dfa = groups_kept == 0 && !backrefs ? build_adfa(root) : nothing
     first = nothing
+    search = Search()
+    forward_root, skip, after_literal, after_length = nothing, nothing, nothing, 0
     if !anchored
         pairs = Int[]
         nullable_first, known = first_chars!(pairs, root)
         known && !nullable_first && (first = CharSet(pairs))
+        search = plan_search(root, backrefs, first, !unicode)
+        if search.plan == PLAN_WINDOWS && search.hi == 0 && anchored_dfa !== nothing && search.literals.single8 !== nothing
+            literal = search.literals.single8
+            rows = after(anchored_dfa, literal)
+            if rows !== nothing
+                after_literal, after_length = rows, length(literal)
+            end
+        end
+        if !NO_SEARCH[] && !backrefs && shallower_than(root, 64) && search.plan == PLAN_SCAN && search.shape == SHAPE_NONE
+            forward_root = root
+            skip = skip_window(root)
+        end
     end
-    return Program(insts, length(c.tracked), c.loops, !unicode, anchored, need8, need16, c.points, q, first)
+    return Program(insts, groups_kept, c.loops, !unicode, anchored, need8, need16, c.points, q, first, search,
+        anchored_dfa, forward_root, missing, skip, after_literal, after_length)
 end
 
 """
