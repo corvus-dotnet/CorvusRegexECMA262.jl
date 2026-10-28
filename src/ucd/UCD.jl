@@ -1,15 +1,16 @@
 """
     UCD
 
-The Unicode Character Database properties the engine reads, for one fixed version of Unicode (ucd.rs of the Rust
-crate).
+The Unicode Character Database properties the engine reads, for each version of Unicode the package carries (ucd.rs
+of the Rust crate): `V13`, `V17` and `V18`, each a `Ucd`.
 
 Nothing in the engine takes Unicode properties from Julia's own, because those follow the Julia release. With its own
 tables the package gives the same answers whatever Julia runs it, and the answers change only when the tables are
-generated again. `VERSION` in tables_gen.jl names the version of Unicode they hold.
+generated again. A pattern is read with the tables of the version it was compiled for.
 
-The tables are in tables_gen.jl, which tools/unicode/gen_tables.py writes from the Rust crate's tables_gen.rs, so every
-engine holds the same data. Each is a sorted list of inclusive ranges, the code points up to U+FFFF as 16-bit bounds
+The tables of a version are in tables<major>_gen.jl and its properties of strings in strings<major>_gen.jl, which
+tools/unicode writes from the Rust crate's tables<major>.rs and strings<major>.rs, so every engine holds the same data;
+each pair is the module `Tables<major>` here. Each is a sorted list of inclusive ranges, the code points up to U+FFFF as 16-bit bounds
 and the rest as 32-bit bounds. A value that follows from other values (a General_Category group such as L, the
 Assigned property, the Unknown script) has no table of its own and is built when it is first asked for.
 
@@ -40,7 +41,24 @@ struct CaseRange
     mask::UInt16
 end
 
-include("tables_gen.jl")
+# The generated data of each version, a module each with the same names.
+module Tables13
+import ..Table, ..CaseRange
+include("tables13_gen.jl")
+include("strings13_gen.jl")
+end
+
+module Tables17
+import ..Table, ..CaseRange
+include("tables17_gen.jl")
+include("strings17_gen.jl")
+end
+
+module Tables18
+import ..Table, ..CaseRange
+include("tables18_gen.jl")
+include("strings18_gen.jl")
+end
 
 function search(ranges::Vector{T}, c::T) where {T}
     lo, hi = 0, length(ranges) >> 1
@@ -118,13 +136,56 @@ function complement_of(t::Table)
     return inverse
 end
 
-# Each value built from others, on first use, and kept.
-const BUILT = Dict{Symbol,Vector{Int}}()
-const BUILT_LOCK = ReentrantLock()
+"""
+The Unicode of one version: its generated data, and what is built from it on first use and then kept (`built`), the
+General_Category groups, the case folding classes, the property sets and the properties of strings among them.
 
-function built(name::Symbol, make)
-    lock(BUILT_LOCK) do
-        get!(make, BUILT, name)
+It is a mutable struct of constant fields so that the parser, which holds one, holds a reference: an immutable struct
+of these fields would be stored inline, and every read of it would copy its fields, and root each, on the stack.
+"""
+mutable struct Ucd
+    const version::String
+    const major::Int
+    const category_tables::Dict{String,Table}
+    const binary_tables::Dict{String,Table}
+    const script_tables::Dict{String,Table}
+    const script_extensions_tables::Dict{String,Table}
+    const script_names::Vector{Vector{String}}
+    const binary_names::Vector{String}
+    const case_folds::Vector{CaseRange}
+    const upper_cases::Vector{CaseRange}
+    "The properties of strings of the v flag (strings<major>_gen.jl)."
+    const strings::Vector{NTuple{3,String}}
+    const built::Dict{Any,Any}
+    const lock::ReentrantLock
+end
+
+function Ucd(m::Module)
+    v = m.VERSION
+    Ucd(v, parse(Int, split(v, '.')[1]), m.CATEGORY_TABLES, m.BINARY_TABLES, m.SCRIPT_TABLES,
+        m.SCRIPT_EXTENSIONS_TABLES, m.SCRIPT_NAMES, m.BINARY_NAMES, m.CASE_FOLDS, m.UPPER_CASES, m.STRING_PROPERTIES,
+        Dict{Any,Any}(), ReentrantLock())
+end
+
+"The versions of Unicode the package carries."
+const V13 = Ucd(Tables13)
+const V17 = Ucd(Tables17)
+const V18 = Ucd(Tables18)
+
+"""
+The Unicode of a version by its major number: 13, 17 or 18. A backreference carries the number of the version it folds
+case with (compile.jl), which is never another.
+"""
+by_major(major::Integer) = major == 13 ? V13 : major == 18 ? V18 : V17
+
+"""
+The value of `key` built for the version, made by `make` the first time it is asked for and then kept. The rest of the
+engine keeps what it builds from a version's tables here: the case folding classes, the property sets and the
+properties of strings.
+"""
+function built(u::Ucd, key, make)
+    lock(u.lock) do
+        get!(make, u.built, key)
     end
 end
 
@@ -132,27 +193,30 @@ end
 # Script or in Script_Extensions. Scripts.txt has no line for it, so the generated tables do not have it.
 const KATAKANA_OR_HIRAGANA = Table(UInt16[], UInt32[])
 
-const GROUPS = Dict{String,Function}(
-    "L" => () -> union_of(GC_LU, GC_LL, GC_LT, GC_LM, GC_LO),
-    "LC" => () -> union_of(GC_LU, GC_LL, GC_LT),
-    "M" => () -> union_of(GC_MN, GC_MC, GC_ME),
-    "N" => () -> union_of(GC_ND, GC_NL, GC_NO),
-    "P" => () -> union_of(GC_PC, GC_PD, GC_PS, GC_PE, GC_PI, GC_PF, GC_PO),
-    "S" => () -> union_of(GC_SM, GC_SC, GC_SK, GC_SO),
-    "Z" => () -> union_of(GC_ZS, GC_ZL, GC_ZP),
-    "C" => () -> union_of(GC_CC, GC_CF, GC_CS, GC_CO, GC_CN),
+# The General_Category values that are groups of other values, by the values they gather.
+const GROUPS = Dict{String,Vector{String}}(
+    "L" => ["Lu", "Ll", "Lt", "Lm", "Lo"],
+    "LC" => ["Lu", "Ll", "Lt"],
+    "M" => ["Mn", "Mc", "Me"],
+    "N" => ["Nd", "Nl", "No"],
+    "P" => ["Pc", "Pd", "Ps", "Pe", "Pi", "Pf", "Po"],
+    "S" => ["Sm", "Sc", "Sk", "So"],
+    "Z" => ["Zs", "Zl", "Zp"],
+    "C" => ["Cc", "Cf", "Cs", "Co", "Cn"],
 )
 
-unknown_script() = built(:unknown, () -> union_of(GC_CN, GC_CO, GC_CS))
+gc(u::Ucd, names...) = union_of((u.category_tables[n] for n in names)...)
+# The code points that belong to no script: the unassigned, private use and surrogate code points.
+unknown_script(u::Ucd) = built(u, :unknown, () -> gc(u, "Cn", "Co", "Cs"))::Vector{Int}
 
 """
-The ranges of a General_Category value by its short name, such as "Lu" or "L", as a fresh vector the caller may
-change, or `nothing` for any other name.
+The ranges of a General_Category value by its short name, such as "Lu" or "L", under a version of Unicode, as a fresh
+vector the caller may change, or `nothing` for any other name.
 """
-function category(name::AbstractString)
-    make = get(GROUPS, name, nothing)
-    make === nothing || return copy(built(Symbol("gc_", name), make))
-    t = get(CATEGORY_TABLES, name, nothing)
+function category(u::Ucd, name::AbstractString)
+    group = get(GROUPS, name, nothing)
+    group === nothing || return copy(built(u, Symbol("gc_", name), () -> gc(u, group...))::Vector{Int})
+    t = get(u.category_tables, name, nothing)
     t === nothing ? nothing : ranges(t)
 end
 
@@ -160,40 +224,41 @@ end
 The ranges of a binary property by its canonical name, such as "Alphabetic" or "White_Space", or `nothing` for any
 other name. ASCII and Any, which ECMA-262 adds to the properties of Unicode, are not here.
 """
-function binary(name::AbstractString)
-    name == "Assigned" && return copy(built(:assigned, () -> complement_of(GC_CN)))
-    t = get(BINARY_TABLES, name, nothing)
+function binary(u::Ucd, name::AbstractString)
+    # The code points that have a General_Category other than Cn.
+    name == "Assigned" && return copy(built(u, :assigned, () -> complement_of(u.category_tables["Cn"]))::Vector{Int})
+    t = get(u.binary_tables, name, nothing)
     t === nothing ? nothing : ranges(t)
 end
 
 "The generated table of a binary property, for the callers that test one code point, or `nothing`."
-binary_table(name::AbstractString) = get(BINARY_TABLES, name, nothing)
+binary_table(u::Ucd, name::AbstractString) = get(u.binary_tables, name, nothing)
 
 """
 The ranges of a Script value by its long name or an alias, such as "Greek" or "Grek", or `nothing` for any other name.
 """
-function script(name::AbstractString)
-    name in ("Unknown", "Zzzz") && return copy(unknown_script())
+function script(u::Ucd, name::AbstractString)
+    name in ("Unknown", "Zzzz") && return copy(unknown_script(u))
     name in ("Katakana_Or_Hiragana", "Hrkt") && return Int[]
-    t = get(SCRIPT_TABLES, name, nothing)
+    t = get(u.script_tables, name, nothing)
     t === nothing ? nothing : ranges(t)
 end
 
 """
 The ranges of a Script_Extensions value by the long name of the script or an alias, or `nothing` for any other name.
 """
-function script_extensions(name::AbstractString)
-    name in ("Unknown", "Zzzz") && return copy(unknown_script())
+function script_extensions(u::Ucd, name::AbstractString)
+    name in ("Unknown", "Zzzz") && return copy(unknown_script(u))
     name in ("Katakana_Or_Hiragana", "Hrkt") && return Int[]
-    t = get(SCRIPT_EXTENSIONS_TABLES, name, nothing)
+    t = get(u.script_extensions_tables, name, nothing)
     t === nothing ? nothing : ranges(t)
 end
 
 "The names of every script: each element is the long name of one script followed by its aliases."
-script_names() = SCRIPT_NAMES
+script_names(u::Ucd) = u.script_names
 
 "The canonical name of every binary property that has a table, which is every name `binary` knows but Assigned."
-binary_names() = BINARY_NAMES
+binary_names(u::Ucd) = u.binary_names
 
 function map_case(table::Vector{CaseRange}, r::Int)
     lo, hi = 0, length(table)
@@ -220,27 +285,27 @@ end
 The simple case folding of a code point (the C and S rows of CaseFolding.txt), which is the code point itself when it
 has none. Two code points are equal ignoring case when `fold` gives the same result for both.
 """
-fold(r::Integer) = fold(Int(r))
-function fold(r::Int)
+fold(u::Ucd, r::Integer) = fold(u, Int(r))
+function fold(u::Ucd, r::Int)
     if r < 0x80
         return 'A' <= Char(r) <= 'Z' ? r + 32 : r
     end
-    return map_case(CASE_FOLDS, r)
+    return map_case(u.case_folds, r)
 end
 
 "The simple uppercase mapping of a code point, which is the code point itself when it has none."
-to_upper(r::Integer) = to_upper(Int(r))
-function to_upper(r::Int)
+to_upper(u::Ucd, r::Integer) = to_upper(u, Int(r))
+function to_upper(u::Ucd, r::Int)
     if r < 0x80
         return 'a' <= Char(r) <= 'z' ? r - 32 : r
     end
-    return map_case(UPPER_CASES, r)
+    return map_case(u.upper_cases, r)
 end
 
 "Every code point that `fold` changes, in ascending order."
-function folding()
+function folding(u::Ucd)
     dst = Int[]
-    for row in CASE_FOLDS
+    for row in u.case_folds
         for offset in 0:Int(row.length)-1
             if offset & row.mask == 0 && row.delta != 0
                 push!(dst, row.first + offset)

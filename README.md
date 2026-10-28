@@ -7,8 +7,13 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
   `v` flag has nested classes, the difference and the intersection of classes, strings in a class and the seven
   properties of strings.
 - ECMAScript 2025: lookbehind, named groups (and a name shared between alternatives), modifier groups such as
-  `(?i:...)`, and every Unicode property ECMA-262 lists, from tables of Unicode 17 the package carries, so a pattern
+  `(?i:...)`, and every Unicode property ECMA-262 lists, from tables of Unicode the package carries, so a pattern
   answers the same whatever Julia runs it.
+- The grammar of ECMAScript 2020, which JSON Schema 2020-12 names, and a choice of Unicode version, each independent
+  of the other: `EcmaRegex(pattern, flags; edition, unicode_version)` takes `edition = :current` (the default) or
+  `:es2020`, and `unicode_version = :default` (V8's version, 17 today), `13`, `17`, `18` or `:latest` (18 today). Both
+  are settled when a pattern is compiled and cost a match nothing. The 2020 grammar refuses what later editions added:
+  the `d` and `v` flags, modifier groups, a group name used twice, and property names outside its tables.
 - Text as UTF-8 (a `String`, a `SubString`, a vector of bytes, or a `Utf8Text`, which is checked once) or as UTF-16 (a
   vector of `UInt16`, lone surrogates and all). Nothing is transcoded. Text that is not UTF-8 is refused, never read as
   U+FFFD. One matcher serves both encodings: Julia compiles it for each.
@@ -19,7 +24,9 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
 - A pattern without a backreference is matched in time proportional to its size times the text. A pattern can be given
   a match timeout, as a `Regex` of .NET can, which bounds the time and the backtracking memory of every match. With a
   timeout and the package's limits of pattern size, neither a pattern nor a text from outside can make a program hang.
-  `set_default_match_timeout!` gives every pattern one.
+  `set_default_match_timeout!` gives every pattern one. `CorvusRegexEcma262.try_compile(pattern, flags; match_timeout)`
+  gives a pattern its own and returns `(regex, nothing)` or `(nothing, error)` in place of throwing (and
+  `tryparse(EcmaRegex, pattern, flags)` the regex or `nothing`), so a validator needs neither the default nor a `try`.
 - The search layer of the crate: literals found by their rarest bytes, the windows of an alternation, the search after
   loops, the shapes answered without the matcher, and automata over ASCII for where a match starts and ends
   (`docs/port-checklist.md`). A global search through `eachmatch!` into a `Captures` allocates nothing.
@@ -30,7 +37,8 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
 **Compliance.** Over the [ECMA-262 test data](https://github.com/corvus-dotnet/ecma262-regex-test-data) (what V8 says
 about its patterns and texts, test262's patterns and `exec` calls, the global search, `replace` and `split` among them,
 and texts of bytes that are not UTF-8, which it refuses), the package gives every answer right and none wrong, refuses
-no valid pattern, accepts no invalid one and reaches no limit, over UTF-8 and over UTF-16. CI runs the whole data on
+no valid pattern, accepts no invalid one and reaches no limit, over UTF-8 and over UTF-16. It does the same on the data
+as the data's own scripts write it for Unicode 13 and 18 and for the grammar of ECMAScript 2020. CI runs all of it on
 every change.
 
 It is a port of the Rust crate [corvus-regex-ecma262](https://github.com/corvus-dotnet/corvus-regex-ecma262-rs), and it
@@ -51,6 +59,10 @@ text = Utf8Text("on 2026-10-25")                       # checked once
 match!(c, text) && capture_range(c, 2)                 # 9:10
 
 findall(ecma"\p{Lu}"u, transcode(UInt16, "Ab Cd"))     # [1:1, 4:4], in UTF-16 code units
+
+# ECMAScript 2020 as its edition was published, with the Unicode of its year, and a match timeout of its own.
+greek, err = CorvusRegexEcma262.try_compile("^\\p{Script=Greek}+\$", "u"; match_timeout=1,
+                                            edition=:es2020, unicode_version=13)
 ```
 
 Errors are exceptions: `InvalidPatternError`, `FlagsError` and `TooLargeError` from a pattern, `EncodingError` from
@@ -94,8 +106,9 @@ julia --project=. tools/stackprobe/run.jl
 ```
 
 `CORVUS_REGEX_MEMO_FROM_THE_START=1` makes every match take its memory of failed places from its first step, which CI
-does for a second run of both. The Unicode tables (`src/ucd/tables_gen.jl`, `src/strings_gen.jl`) are written from the
-Rust crate's by `tools/unicode`, and CI checks they are current.
+does for a second run of both. The Unicode tables of each version (`src/ucd/tables<major>_gen.jl`,
+`src/ucd/strings<major>_gen.jl`) and the property names of ECMAScript 2020 (`src/es2020_gen.jl`) are written from the
+Rust crate's by `tools/unicode`, and CI checks them against the crate.
 
 ## Releasing
 

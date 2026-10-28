@@ -8,8 +8,8 @@
 # The parser applies the equivalence to every literal and class as it reads them, so a case-insensitive group is
 # matched with plain classes. Only a backreference needs the function when matching.
 #
-# The folding and the uppercase mapping come from the tables of UCD, never from Julia's own, so a pattern matches the
-# same texts whichever Julia runs it.
+# The folding and the uppercase mapping come from the tables of UCD of the pattern's version of Unicode, never from
+# Julia's own, so a pattern matches the same texts whichever Julia runs it.
 
 # The characters of the Basic Multilingual Plane whose uppercase form is more than one character. Canonicalize leaves
 # them alone.
@@ -20,13 +20,13 @@ const MULTI_UPPER = CharSet(Int[
     0x1FE4, 0x1FE6, 0x1FE7, 0x1FF2, 0x1FF4, 0x1FF6, 0x1FF7, 0x1FFC, 0x1FFC, 0xFB00, 0xFB06, 0xFB13, 0xFB17,
 ])
 
-"The Canonicalize function of ECMA-262 for case-insensitive matching."
-function canonicalize(r::Int, unicode_mode::Bool)
+"The Canonicalize function of ECMA-262 for case-insensitive matching, with the case mappings of a version of Unicode."
+function canonicalize(u::UCD.Ucd, r::Int, unicode_mode::Bool)
     # Every character of a simple case folding class folds to the same character.
-    unicode_mode && return UCD.fold(r)
+    unicode_mode && return UCD.fold(u, r)
     # A character beyond the Basic Multilingual Plane is two code units, and neither has an uppercase form.
     (r > 0xFFFF || r in MULTI_UPPER) && return r
-    upper = UCD.to_upper(r)
+    upper = UCD.to_upper(u, r)
     (r >= 128 && upper < 128 || upper > 0xFFFF) && return r
     return upper
 end
@@ -57,37 +57,44 @@ function FoldTable(classes::Dict{Int,Vector{Int}})
     return FoldTable(points, [by_member[p] for p in points], kept)
 end
 
-const FOLD_TABLES = Dict{Bool,FoldTable}()
-const FOLD_LOCK = ReentrantLock()
-
-function build_fold_table(unicode_mode::Bool)
+function build_fold_table(u::UCD.Ucd, unicode_mode::Bool)
     classes = Dict{Int,Vector{Int}}()
     if unicode_mode
         # A class is a character that others fold to, with those others.
-        for r in UCD.folding()
-            key = UCD.fold(r)
+        for r in UCD.folding(u)
+            key = UCD.fold(u, r)
             push!(get!(() -> [key], classes, key), r)
         end
     else
         for r in 0:0xFFFF
-            push!(get!(Vector{Int}, classes, canonicalize(r, false)), r)
+            push!(get!(Vector{Int}, classes, canonicalize(u, r, false)), r)
         end
     end
     return FoldTable(classes)
 end
 
 """
-The table of the grammar in use. It is built on first use, which only a pattern with a case-insensitive group
-reaches.
+The table of the grammar in use for a version of Unicode. It is built on first use, which only a pattern with a
+case-insensitive group reaches, and kept with the version's tables.
 """
-fold_classes(unicode_mode::Bool) = lock(() -> get!(() -> build_fold_table(unicode_mode), FOLD_TABLES, unicode_mode), FOLD_LOCK)
+fold_classes(u::UCD.Ucd, unicode_mode::Bool) =
+    UCD.built(u, (:fold, unicode_mode), () -> build_fold_table(u, unicode_mode))::FoldTable
 
 """
-The set of every character equivalent to some member of the set, and the number of characters with a case variant
-that the set holds, which is the work it did.
+Whether two characters are equal ignoring case, with the case mappings of the version of Unicode whose major number a
+backreference carries (compile.jl): the test of a case-insensitive backreference.
 """
-function fold_closure(set::CharSet, unicode_mode::Bool)
-    table = fold_classes(unicode_mode)
+function equal_ignoring_case(major::Int, a::Int, b::Int, unicode_mode::Bool)
+    u = UCD.by_major(major)
+    return canonicalize(u, a, unicode_mode) == canonicalize(u, b, unicode_mode)
+end
+
+"""
+The set of every character equivalent to some member of the set under a version of Unicode, and the number of
+characters with a case variant that the set holds, which is the work it did.
+"""
+function fold_closure(u::UCD.Ucd, set::CharSet, unicode_mode::Bool)
+    table = fold_classes(u, unicode_mode)
     extra = Int[]
     variants = 0
     points = table.points

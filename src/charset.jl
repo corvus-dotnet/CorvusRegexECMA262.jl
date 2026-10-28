@@ -160,54 +160,54 @@ The canonical name of a binary property ECMA-262 lists, from the name or an alia
 """
 binary_name(name::AbstractString) = get(BINARY_NAMES, name, "")
 
-# The sets already built for property expressions. A property set can have hundreds of ranges, and schemas tend to
-# repeat the same few. Only an expression ECMA-262 defines is kept, and those are a fixed few hundred, so the cache is
-# bounded.
-const PROPERTY_CACHE = Dict{String,CharSet}()
-const PROPERTY_LOCK = ReentrantLock()
+# The sets already built for property expressions, one cache for each version of Unicode. A property set can have
+# hundreds of ranges, and schemas tend to repeat the same few. Only an expression ECMA-262 defines is kept, and those
+# are a fixed few hundred, so each cache is bounded.
+property_cache(u::UCD.Ucd) = UCD.built(u, :property_cache, () -> Dict{String,CharSet}())::Dict{String,CharSet}
 
 """
-The set of the expression between the braces of \\p{...}, or `nothing` for a name or value that ECMA-262 does not
-define.
+The set of the expression between the braces of \\p{...} under a version of Unicode, or `nothing` for a name or value
+that ECMA-262 does not define.
 """
-function property_set(expr::AbstractString)
+function property_set(u::UCD.Ucd, expr::AbstractString)
     expr = String(expr)
-    lock(PROPERTY_LOCK) do
-        cached = get(PROPERTY_CACHE, expr, nothing)
+    cache = property_cache(u)
+    lock(u.lock) do
+        cached = get(cache, expr, nothing)
         cached === nothing || return cached
-        pairs = property_pairs(expr)
+        pairs = property_pairs(u, expr)
         pairs === nothing && return nothing
         set = CharSet(pairs)
-        PROPERTY_CACHE[expr] = set
+        cache[expr] = set
         return set
     end
 end
 
 """
-The ranges of a property expression, or `nothing`. Every range comes from the tables of UCD, which hold one fixed
-version of Unicode, so the answer does not depend on the Julia release.
+The ranges of a property expression, or `nothing`. Every range comes from the tables of UCD of the version, so the
+answer does not depend on the Julia release.
 """
-function property_pairs(expr::String)
+function property_pairs(u::UCD.Ucd, expr::String)
     eq = findfirst('=', expr)
     if eq !== nothing
         name, value = expr[1:eq-1], expr[eq+1:end]
-        name in ("General_Category", "gc") && return category_pairs(value)
-        name in ("Script", "sc") && return UCD.script(value)
-        name in ("Script_Extensions", "scx") && return UCD.script_extensions(value)
+        name in ("General_Category", "gc") && return category_pairs(u, value)
+        name in ("Script", "sc") && return UCD.script(u, value)
+        name in ("Script_Extensions", "scx") && return UCD.script_extensions(u, value)
         return nothing
     end
-    pairs = category_pairs(expr)
+    pairs = category_pairs(u, expr)
     pairs === nothing || return pairs
     canonical = binary_name(expr)
     canonical == "" && return nothing
     canonical == "ASCII" && return Int[0, 0x7F]
     canonical == "Any" && return Int[0, MAX_RUNE]
-    return UCD.binary(canonical)
+    return UCD.binary(u, canonical)
 end
 
-function category_pairs(value::AbstractString)
+function category_pairs(u::UCD.Ucd, value::AbstractString)
     name = category_name(value)
-    name == "" ? nothing : UCD.category(name)
+    name == "" ? nothing : UCD.category(u, name)
 end
 
 "The code points in both sets."
@@ -244,47 +244,48 @@ struct StringProperty
     strings::Vector{Vector{Int}}
 end
 
-include("strings_gen.jl")
-
 hex_rune(s::AbstractString) = parse(Int, s; base=16)
 
-const ALL_STRING_PROPERTIES = Ref{Vector{StringProperty}}()
-const STRING_PROPERTIES_LOCK = ReentrantLock()
+"""
+The properties of strings of a version of Unicode (strings<major>_gen.jl), with their union last, read on first use and
+kept with the version's tables.
+"""
+all_string_properties(u::UCD.Ucd) =
+    UCD.built(u, :string_properties, () -> read_string_properties(u.strings))::Vector{StringProperty}
 
-function all_string_properties()
-    lock(STRING_PROPERTIES_LOCK) do
-        isassigned(ALL_STRING_PROPERTIES) && return ALL_STRING_PROPERTIES[]
-        all = StringProperty[]
-        union = Int[]
-        every = Vector{Int}[]
-        for row in STRING_PROPERTIES
-            pairs = Int[]
-            for item in split(row[2])
-                parts = split(item, "..")
-                lo = parts[1]
-                hi = length(parts) == 2 ? parts[2] : lo
-                push!(pairs, hex_rune(lo), hex_rune(hi))
-            end
-            sequences = Vector{Int}[]
-            for s in split(row[3], ';')
-                isempty(s) && continue
-                push!(sequences, [hex_rune(c) for c in split(s)])
-            end
-            append!(union, pairs)
-            append!(every, sequences)
-            push!(all, StringProperty(CharSet(pairs), sequences))
+function read_string_properties(rows::Vector{NTuple{3,String}})
+    all = StringProperty[]
+    union = Int[]
+    every = Vector{Int}[]
+    for row in rows
+        pairs = Int[]
+        for item in split(row[2])
+            parts = split(item, "..")
+            lo = parts[1]
+            hi = length(parts) == 2 ? parts[2] : lo
+            push!(pairs, hex_rune(lo), hex_rune(hi))
         end
-        push!(all, StringProperty(CharSet(union), every))
-        ALL_STRING_PROPERTIES[] = all
-        return all
+        sequences = Vector{Int}[]
+        for s in split(row[3], ';')
+            isempty(s) && continue
+            push!(sequences, [hex_rune(c) for c in split(s)])
+        end
+        append!(union, pairs)
+        append!(every, sequences)
+        push!(all, StringProperty(CharSet(pairs), sequences))
     end
+    push!(all, StringProperty(CharSet(union), every))
+    return all
 end
 
-"The property of strings of the name (RGI_Emoji and the six it is the union of), or `nothing`."
-function string_property_of(name::AbstractString)
-    all = all_string_properties()
+"""
+The property of strings of the name (RGI_Emoji and the six it is the union of) under a version of Unicode, or
+`nothing`.
+"""
+function string_property_of(u::UCD.Ucd, name::AbstractString)
+    all = all_string_properties(u)
     name == "RGI_Emoji" && return all[end]
-    for (k, row) in enumerate(STRING_PROPERTIES)
+    for (k, row) in enumerate(u.strings)
         row[1] == name && return all[k]
     end
     return nothing
@@ -294,8 +295,8 @@ end
 The generated table of a binary property the engine relies on. Its absence means the generated tables are broken, so
 it throws.
 """
-function must_binary_table(name::AbstractString)
-    t = UCD.binary_table(name)
+function must_binary_table(u::UCD.Ucd, name::AbstractString)
+    t = UCD.binary_table(u, name)
     t === nothing && error("the Unicode tables have no " * name)
     return t
 end

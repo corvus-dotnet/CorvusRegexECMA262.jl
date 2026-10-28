@@ -2,6 +2,7 @@
 # the runner of the Rust crate does (tools/src/bin/dataset.rs there), with the same judging rules.
 #
 #   julia -t 4 --project=. tools/dataset/run.jl <data directory> <wrong-cases output file> [file filter] [utf16|utf8|both] [--compliance <file>]
+#       [--edition current|es2020] [--unicode 13|17|18|latest]
 #
 # Each record is asked about under each grammar V8 found it valid in: the record's flags with u added (the unicode
 # answers), the record's flags alone (the legacy answers) and, in the file that has them, the flags with v added (the
@@ -15,6 +16,9 @@
 # record's flags from its lastIndex, right when the positions of the match and of every group, the named groups and,
 # with g or y, the lastIndex after are V8's; one answer over UTF-16 and, when the text holds no lone surrogate and
 # lastIndex is not between the halves of a pair, one over UTF-8 with positions in bytes.
+#
+# With --edition and --unicode the engine reads every pattern with that edition's grammar and that version's tables, and
+# the data is the data as node edition.js apply or node unicode.js apply writes it for them.
 #
 # With --compliance <file>, the engine's compliance object is written to the file, as the benchmark page reads it
 # (docs/implementing-a-source.md in corvus-regex-ecma262-benchmarks): the counts, this runner and the calls it makes in
@@ -121,7 +125,12 @@ end
 
 first_line(s::AbstractString) = (k = findfirst('\n', s); k === nothing ? s : s[1:prevind(s, k)])
 
-compile(pattern::String, flags::String) = EcmaRegex(pattern, flags; match_timeout=LIMIT)
+# The edition and the version of Unicode the engine reads every pattern with (--edition, --unicode).
+const EDITION = Ref(:current)
+const UNICODE_VERSION = Ref{Union{Symbol,Int}}(:default)
+
+compile(pattern::String, flags::String) =
+    EcmaRegex(pattern, flags; match_timeout=LIMIT, edition=EDITION[], unicode_version=UNICODE_VERSION[])
 
 "Which limit a match reached, or `nothing` when the error is not a limit."
 limit_kind(e) = e isa C.MatchTimeoutError ? "time" : e isa C.MatchMemoryError ? "memory" : nothing
@@ -196,6 +205,9 @@ function judge_tests(name::String, r, pattern::String, c::Counts, wrong::Vector{
                 "PARSE: " * sprint(showerror, e)
             elseif e isa C.TooLargeError
                 "TOO-LARGE: " * sprint(showerror, e)
+            elseif e isa C.FlagsError
+                # The flags of a grammar the edition does not have (the v flag of ECMAScript 2020): a refusal.
+                "FLAGS: " * sprint(showerror, e)
             else
                 c.errors += 1
                 "ERROR: " * sprint(showerror, e)
@@ -468,6 +480,14 @@ function judge_captures(r, pattern::String, c::Counts, wrong::Vector{String})
             nothing
         end
     end
+    # A grammar the data finds the pattern not valid in, as an overlay may, must be refused here too.
+    for m in ("unicode", "legacy")
+        mode_flags = m == "unicode" ? flags * "u" : flags
+        if get_(valid, m) == false && make(mode_flags) !== nothing
+            c.accepted += 1
+            push!(wrong, "ACCEPTED-INVALID\tcaptures.jsonl\t/" * shown * "/" * mode_flags)
+        end
+    end
     for t in something(array(get_(r, "tests")), [])
         get_(t, "v8_deviation") == true && continue
         text = str(get_(t, "text"))
@@ -706,8 +726,22 @@ function main(args::Vector{String})
         compliance = args[at+1]
         deleteat!(args, at:at+1)
     end
+    at = findfirst(==("--edition"), args)
+    if at !== nothing
+        e = args[at+1]
+        e in ("current", "es2020") || error("the edition is current or es2020, not $e")
+        EDITION[] = Symbol(e)
+        deleteat!(args, at:at+1)
+    end
+    at = findfirst(==("--unicode"), args)
+    if at !== nothing
+        v = replace(args[at+1], ".0" => "")
+        v in ("13", "17", "18", "latest") || error("the Unicode version is 13, 17, 18 or latest, not $v")
+        UNICODE_VERSION[] = v == "latest" ? :latest : parse(Int, v)
+        deleteat!(args, at:at+1)
+    end
     if length(args) < 2
-        println(stderr, "usage: run.jl <data directory> <wrong-cases output file> [file filter] [utf16|utf8|both] [--compliance <file>]")
+        println(stderr, "usage: run.jl <data directory> <wrong-cases output file> [file filter] [utf16|utf8|both] [--compliance <file>] [--edition current|es2020] [--unicode 13|17|18|latest]")
         exit(2)
     end
     directory, wrong_path = args[1], args[2]
