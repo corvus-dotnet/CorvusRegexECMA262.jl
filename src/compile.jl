@@ -71,7 +71,8 @@ mutable struct Inst
     # Jump targets.
     x::Int
     y::Int
-    # A group, a loop or a range of groups, depending on the instruction.
+    # A group, a loop or a range of groups, depending on the instruction. For a backreference b is the major number of
+    # the version of Unicode whose case folding it matches with.
     a::Int
     b::Int
     # Bound a repetition. A max of -1 is no bound.
@@ -399,7 +400,7 @@ end
 "A deep copy of a tree. A class is immutable, so the copy shares it."
 function clone_node(n::Node)
     Node(n.kind, n.r, n.set, Node[clone_node(s) for s in n.subs], n.min, n.max, n.lazy, n.group, copy(n.groups),
-        copy(n.name), n.fold, n.behind, n.negative)
+        copy(n.name), n.fold, n.fold_version, n.behind, n.negative)
 end
 
 "Whether a node holds a capturing group, a backreference or a lookaround."
@@ -564,7 +565,7 @@ function emit!(c::Compiler, n::Node, back::Bool)
         # When several groups share the name, at most one has taken part, and the others match the empty string. So
         # matching each in turn matches the one that took part.
         for g in n.groups
-            add!(c, Inst(o; a=c.tracked[g], flag=c.unicode))
+            add!(c, Inst(o; a=c.tracked[g], b=n.fold_version, flag=c.unicode))
         end
     elseif k == N_LOOK
         look = add!(c, Inst(OP_LOOK; flag=n.negative))

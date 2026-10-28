@@ -96,13 +96,15 @@ end
 A UTF-16 code unit's share of text in parts per ten thousand, for the choice of the unit a search over UTF-16 looks
 for: an ASCII unit as UNIT_SHARE has it; a capital of another alphabet (Latin, Greek, Cyrillic, Armenian) as rare as an
 ASCII capital and its small letters as common as the commonest ASCII ones, since a text in that script is mostly them;
-anything else rare. The letters are the package's own Unicode tables'.
+anything else rare. The letters are the package's own Unicode tables' of the default version: a share only guides the
+choice of a unit, and these alphabets are the same in every version.
 """
 function share16(u::UInt16)
     u < 0x80 && return unit_share(u)
     if u < 0x250 || 0x370 <= u < 0x590
-        UCD.contains(UCD.GC_LU, u) && return 20
-        any(t -> UCD.contains(t, u), (UCD.GC_LL, UCD.GC_LT, UCD.GC_LM, UCD.GC_LO)) && return 500
+        T = UCD.Tables17
+        UCD.contains(T.GC_LU, u) && return 20
+        any(t -> UCD.contains(t, u), (T.GC_LL, T.GC_LT, T.GC_LM, T.GC_LO)) && return 500
     end
     return 10
 end

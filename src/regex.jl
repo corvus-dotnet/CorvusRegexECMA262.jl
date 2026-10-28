@@ -108,7 +108,7 @@ struct GroupInfoName
 end
 
 """
-    EcmaRegex(pattern, flags = ""; match_timeout = default_match_timeout())
+    EcmaRegex(pattern, flags = ""; match_timeout = default_match_timeout(), edition = :current, unicode_version = :default)
 
 A pattern compiled as `new RegExp(pattern, flags)` compiles it: with the u or v flag by the grammar of the u flag and
 matched by code point; with neither by the Annex B grammar and matched by UTF-16 code unit. The i, m and s flags are the
@@ -117,6 +117,12 @@ modifiers in force at the start of the pattern, which a modifier group such as `
 A pattern can have a match timeout in seconds, as a Regex of .NET has: the time each match may take, which brings a cap
 on the memory of its backtracking with it. A match that reaches a limit throws a MatchTimeoutError or a
 MatchMemoryError. A pattern without a timeout never reaches a limit.
+
+`edition` is the edition of ECMA-262 whose grammar the pattern is read with: `:current`, today's, or `:es2020`, the
+grammar of ECMAScript 2020 that JSON Schema 2020-12 names, which refuses what later editions added (the d and v flags,
+modifier groups, a group name used twice, and property names outside its tables). `unicode_version` is the version of
+Unicode whose tables it is read with, independent of the edition: `:default` (V8's, 17 today), `13`, `17`, `18` or
+`:latest` (18 today). Both are settled when the pattern is compiled and cost a match nothing.
 
 An invalid pattern throws an InvalidPatternError, a pattern over a limit of size a TooLargeError, and invalid flags a
 FlagsError. A compiled pattern is safe to share between tasks.
@@ -131,6 +137,9 @@ mutable struct EcmaRegex <: AbstractPattern
     names::Vector{GroupInfoName}
     # The time each match may take, in nanoseconds; 0 for no limit.
     timeout::Int
+    # The edition of the grammar and the version of Unicode, resolved, the pattern was read with.
+    edition::Symbol
+    unicode_version::Int
     # The pattern needs no backtracking and is small enough for a linear matcher (re2_cost), so a test from the start
     # of a text can be answered by the automaton over ASCII (see dfa.jl): `missing` until the first such test builds it,
     # then the automaton or `nothing` for none.
@@ -138,15 +147,18 @@ mutable struct EcmaRegex <: AbstractPattern
     @atomic dfa::Union{Missing,Nothing,Dfa}
 end
 
-function EcmaRegex(pattern::AbstractString, flags::AbstractString=""; match_timeout::Union{Nothing,Real}=default_match_timeout())
-    EcmaRegex(pattern, parse_flags(flags); match_timeout)
+function EcmaRegex(pattern::AbstractString, flags::AbstractString=""; match_timeout::Union{Nothing,Real}=default_match_timeout(),
+                   edition::Symbol=:current, unicode_version::Union{Symbol,Integer}=:default)
+    EcmaRegex(pattern, parse_flags(flags); match_timeout, edition, unicode_version)
 end
 
-function EcmaRegex(pattern::AbstractString, flags::Flags; match_timeout::Union{Nothing,Real}=default_match_timeout())
+function EcmaRegex(pattern::AbstractString, flags::Flags; match_timeout::Union{Nothing,Real}=default_match_timeout(),
+                   edition::Symbol=:current, unicode_version::Union{Symbol,Integer}=:default)
+    sx = syntax_of(flags, edition, unicode_version)
     pattern = String(pattern)
     isvalid(pattern) || throw(EncodingError("the pattern $(repr(pattern)) is not UTF-8"))
     root, ps = try
-        parse_with(pattern, syntax(flags))
+        parse_with(pattern, sx)
     catch e
         e isa SyntaxError && throw(InvalidPatternError(pattern, e.msg, e.offset))
         rethrow()
@@ -156,23 +168,76 @@ function EcmaRegex(pattern::AbstractString, flags::Flags; match_timeout::Union{N
     timeout = match_timeout === nothing ? 0 : max(round(Int, match_timeout * 1e9), 0)
     regular = !ps.needs_backtracking && re2_cost(root) <= MAX_RE2_COST
     prog = compile_program(root, flags.unicode || flags.unicode_sets, -1)
-    return EcmaRegex(pattern, flags, prog, nothing, ps.groups, names, timeout, regular, missing)
+    return EcmaRegex(pattern, flags, prog, nothing, ps.groups, names, timeout, edition, sx.unicode_version, regular,
+        missing)
 end
 
 """
-    isvalid_pattern(pattern, flags = "")
-
-Whether a pattern is valid with the flags and within the limits of size.
+The major number of a version of Unicode as `EcmaRegex` takes it: `:default` is V8's (17), `:latest` the newest the
+package carries (18), and 13, 17 and 18 are themselves. Any other is an ArgumentError.
 """
-function isvalid_pattern(pattern::AbstractString, flags::AbstractString="")
-    f = try
-        parse_flags(flags)
-    catch
+function resolve_unicode_version(v::Union{Symbol,Integer})
+    v === :default && return 17
+    v === :latest && return 18
+    v isa Integer && v in (13, 17, 18) && return Int(v)
+    throw(ArgumentError("the Unicode version is :default, 13, 17, 18 or :latest, not $(repr(v))"))
+end
+
+"""
+The grammar of flags in an edition, under a version of Unicode. The grammar of ECMAScript 2020 has no d flag (2022) and
+no v flag (2024), and refuses them as a FlagsError.
+"""
+function syntax_of(f::Flags, edition::Symbol, unicode_version::Union{Symbol,Integer})
+    edition in (:current, :es2020) || throw(ArgumentError("the edition is :current or :es2020, not $(repr(edition))"))
+    major = resolve_unicode_version(unicode_version)
+    if edition === :es2020 && (f.has_indices || f.unicode_sets)
+        throw(FlagsError("the flags \"$(string(f))\" have d or v, which ECMAScript 2020 does not have"))
+    end
+    sx = syntax(f)
+    return Syntax(sx.unicode, sx.sets, sx.icase, sx.multiline, sx.dot_all, edition === :es2020, major)
+end
+
+"""
+    try_compile(pattern, flags = ""; match_timeout = default_match_timeout(), edition = :current, unicode_version = :default)
+
+`EcmaRegex(pattern, flags; ...)` without throwing for the pattern or the flags: `(regex, nothing)`, or `(nothing, error)`
+with the InvalidPatternError, TooLargeError, FlagsError or EncodingError of why it was not compiled. A validator that
+compiles patterns from outside takes this form, and gives each a match timeout of its own.
+"""
+function try_compile(pattern::AbstractString, flags::Union{AbstractString,Flags}=""; kwargs...)
+    try
+        return EcmaRegex(pattern, flags; kwargs...), nothing
+    catch e
+        e isa Union{InvalidPatternError,TooLargeError,FlagsError,EncodingError} || rethrow()
+        return nothing, e
+    end
+end
+
+"""
+    tryparse(EcmaRegex, pattern, flags = ""; kwargs...)
+
+The compiled pattern, or `nothing` when it is not valid (see `try_compile`, which gives the error too).
+"""
+Base.tryparse(::Type{EcmaRegex}, pattern::AbstractString, flags::Union{AbstractString,Flags}=""; kwargs...) =
+    try_compile(pattern, flags; kwargs...)[1]
+
+"""
+    isvalid_pattern(pattern, flags = ""; edition = :current, unicode_version = :default)
+
+Whether a pattern is valid with the flags and within the limits of size, in the grammar of an edition and under a
+version of Unicode (see `EcmaRegex`).
+"""
+function isvalid_pattern(pattern::AbstractString, flags::AbstractString=""; edition::Symbol=:current,
+                         unicode_version::Union{Symbol,Integer}=:default)
+    sx = try
+        syntax_of(parse_flags(flags), edition, unicode_version)
+    catch e
+        e isa FlagsError || rethrow()
         return false
     end
     isvalid(pattern) || return false
     try
-        parse_with(pattern, syntax(f))
+        parse_with(pattern, sx)
         return true
     catch e
         (e isa SyntaxError || e isa TooLargeError) && return false
@@ -193,6 +258,18 @@ Base.show(io::IO, re::EcmaRegex) = print(io, "ecma\"", escape_string(re.pattern,
 
 "The pattern as it was compiled."
 pattern(re::EcmaRegex) = re.pattern
+
+"The edition of ECMA-262 whose grammar the pattern was read with: `:current` or `:es2020`."
+edition(re::EcmaRegex) = re.edition
+
+"The version of Unicode whose tables the pattern was read with, resolved: 13, 17 or 18."
+unicode_version(re::EcmaRegex) = re.unicode_version
+
+"The grammar the pattern was read with, to read it again."
+function syntax(re::EcmaRegex)
+    sx = syntax(re.flags)
+    return Syntax(sx.unicode, sx.sets, sx.icase, sx.multiline, sx.dot_all, re.edition === :es2020, re.unicode_version)
+end
 "The pattern's flags."
 flags(re::EcmaRegex) = re.flags
 "The time each match may take in seconds, or `nothing` for no limit."
@@ -227,7 +304,7 @@ const CAPS_LOCK = ReentrantLock()
 function automaton(re::EcmaRegex)
     d = @atomic re.dfa
     d === missing || return d
-    root, _ = parse_with(re.pattern, syntax(re.flags))
+    root, _ = parse_with(re.pattern, syntax(re))
     built = build_dfa(root)
     @atomic re.dfa = built
     return built
@@ -261,7 +338,7 @@ end
     try
         caps = @atomic re.caps
         caps === nothing || return caps
-        root, _ = parse_with(re.pattern, syntax(re.flags))
+        root, _ = parse_with(re.pattern, syntax(re))
         built = compile_program(root, is_unicode(re), re.groups)
         @atomic re.caps = built
         return built

@@ -20,6 +20,7 @@ include("ucd/UCD.jl")
 using .UCD
 
 include("charset.jl")
+include("es2020_gen.jl")
 include("fold.jl")
 include("units.jl")
 include("parse.jl")

@@ -766,7 +766,7 @@ function run_on!(p::Program, st::State, stack::Vector{Entry}, input::Text16or8, 
                 end
                 got, w2 = read_at(input, at, units)
                 at += w2
-                ok = got == want || op == OP_BACKREF_FOLD && canonicalize(got, i.flag) == canonicalize(want, i.flag)
+                ok = got == want || op == OP_BACKREF_FOLD && equal_ignoring_case(i.b, got, want, i.flag)
             end
             if ok
                 pos = at
@@ -792,7 +792,7 @@ function run_on!(p::Program, st::State, stack::Vector{Entry}, input::Text16or8, 
                 got, w2 = read_last(input, at, units)
                 at -= w2
                 ok = got == want ||
-                     op == OP_BACKREF_FOLD_BACK && canonicalize(got, i.flag) == canonicalize(want, i.flag)
+                     op == OP_BACKREF_FOLD_BACK && equal_ignoring_case(i.b, got, want, i.flag)
             end
             if ok
                 pos = at

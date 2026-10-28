@@ -103,12 +103,14 @@ mutable struct Node
     name::Vector{Int}
     # Marks an N_BACKREF, N_WORD_BOUNDARY or N_NOT_WORD_BOUNDARY inside a case-insensitive group.
     fold::Bool
+    # The major number of the version of Unicode whose case folding an N_BACKREF matches with.
+    fold_version::Int
     # behind and negative describe an N_LOOK.
     behind::Bool
     negative::Bool
 end
 
-Node(kind::NodeKind) = Node(kind, 0, nothing, Node[], 0, 0, false, 0, Int[], Int[], false, false, false)
+Node(kind::NodeKind) = Node(kind, 0, nothing, Node[], 0, 0, false, 0, Int[], Int[], false, 0, false, false)
 with_subs(kind::NodeKind, subs::Node...) = (n = Node(kind); append!(n.subs, subs); n)
 char_node(r::Int) = (n = Node(N_CHAR); n.r = r; n)
 set_node(set::CharSet) = (n = Node(N_SET); n.set = set; n)
@@ -127,9 +129,9 @@ function look_node(body::Node, negative::Bool, behind::Bool)
     n.negative, n.behind = negative, behind
     return n
 end
-function backref_node(groups::Vector{Int}, name::Vector{Int}, fold::Bool)
+function backref_node(groups::Vector{Int}, name::Vector{Int}, fold::Bool, fold_version::Int)
     n = Node(N_BACKREF)
-    n.groups, n.name, n.fold = groups, name, fold
+    n.groups, n.name, n.fold, n.fold_version = groups, name, fold, fold_version
     return n
 end
 
@@ -163,7 +165,14 @@ struct Syntax
     icase::Bool
     multiline::Bool
     dot_all::Bool
+    # The grammar of ECMAScript 2020, which refuses what later editions added.
+    es2020::Bool
+    # The major number of the version of Unicode whose tables the pattern is read with: 13, 17 or 18.
+    unicode_version::Int
 end
+
+Syntax(unicode::Bool, sets::Bool, icase::Bool, multiline::Bool, dot_all::Bool) =
+    Syntax(unicode, sets, icase, multiline, dot_all, false, 17)
 
 """
 Reads a pattern by recursive descent. With `unicode` set it applies the grammar of the u flag. Without it, it applies
@@ -179,6 +188,10 @@ mutable struct Parser
     sets::Bool
     # The sequences of the property of strings the last class escape named (the v flag), or nothing.
     escape_strings::Union{Nothing,Vector{Vector{Int}}}
+    # The Unicode of the version the pattern is read with.
+    ucd::UCD.Ucd
+    # The grammar of ECMAScript 2020, which refuses what later editions added.
+    es2020::Bool
     depth::Int
     # group_count and has_names come from a scan of the whole pattern before parsing, because the meaning of \1 and \k
     # depends on groups that may follow them.
@@ -217,8 +230,8 @@ function parse_with(pattern::AbstractString, sx::Syntax)
     ncodeunits(pattern) > MAX_PATTERN_LENGTH && throw(TooLargeError(LIMIT_LENGTH, MAX_PATTERN_LENGTH))
     p = Int[codepoint(c) for c in pattern]
     sx.unicode || (p = code_units(p))
-    ps = Parser(p, 0, sx.unicode, sx.sets, nothing, 0, 0, false, 0, Dict{Vector{Int},Vector{NamedGroup}}(), false,
-        Branch[], 0, sx.icase, sx.multiline, sx.dot_all, false, 0)
+    ps = Parser(p, 0, sx.unicode, sx.sets, nothing, UCD.by_major(sx.unicode_version), sx.es2020, 0, 0, false, 0,
+        Dict{Vector{Int},Vector{NamedGroup}}(), false, Branch[], 0, sx.icase, sx.multiline, sx.dot_all, false, 0)
     scan_groups!(ps)
     root = disjunction!(ps)
     if ps.i < length(ps.p)
@@ -289,8 +302,9 @@ in_ascii(c::Int, set::String) = 0 <= c < 0x80 && Char(c) in set
 "Whether c is one of the characters the u flag lets an identity escape name."
 syntax_character(c::Int) = in_ascii(c, raw"^$\.*+?()[]{}|/")
 
-const ID_START = must_binary_table("ID_Start")
-const ID_CONTINUE = must_binary_table("ID_Continue")
+# The tables a group name is read with, in a version of Unicode.
+id_start(u::UCD.Ucd) = UCD.built(u, :id_start, () -> must_binary_table(u, "ID_Start"))::UCD.Table
+id_continue(u::UCD.Ucd) = UCD.built(u, :id_continue, () -> must_binary_table(u, "ID_Continue"))::UCD.Table
 
 function append_class_atom!(pairs::Vector{Int}, c::Int, set::Union{Nothing,CharSet})
     set === nothing ? push!(pairs, c, c) : append!(pairs, set.ranges)
@@ -405,7 +419,7 @@ it.
 """
 function char_node_of(ps::Parser, c::Int)
     if ps.icase
-        set, _ = fold_closure(CharSet(Int[c, c]), ps.unicode)
+        set, _ = fold_closure(ps.ucd, CharSet(Int[c, c]), ps.unicode)
         (length(set.ranges) != 2 || set.ranges[1] != set.ranges[2]) && return set_node(set)
     end
     return char_node(c)
@@ -422,7 +436,7 @@ The set with every character equivalent to one of its members. It charges the pa
 byte for each character with a case variant that the set holds, and its ranges.
 """
 function fold!(ps::Parser, set::CharSet)
-    closed, variants = fold_closure(set, ps.unicode)
+    closed, variants = fold_closure(ps.ucd, set, ps.unicode)
     charge!(ps, variants + RANGE_SIZE * length(closed.ranges) ÷ 2)
     return closed
 end
@@ -561,7 +575,8 @@ function group!(ps::Parser)
         return with_subs(N_GROUP, body), true
     end
     c = peek(ps)
-    (is(c, 'i') || is(c, 'm') || is(c, 's') || is(c, '-')) && return modifier_group!(ps), true
+    # Modifier groups came in ECMAScript 2025, so the 2020 grammar reads (?i as an invalid group.
+    (is(c, 'i') || is(c, 'm') || is(c, 's') || is(c, '-')) && !ps.es2020 && return modifier_group!(ps), true
     if eat!(ps, '=') || eat!(ps, '!')
         negative = is(at(ps, ps.i - 1), '!')
         body = disjunction!(ps)
@@ -580,7 +595,8 @@ function group!(ps::Parser)
         end
         name = group_name!(ps)
         # Two groups may share a name only when they are in separate alternatives of one disjunction, so that no match
-        # can go through both.
+        # can go through both. The 2020 grammar refuses a name used twice, wherever the groups are.
+        ps.es2020 && haskey(ps.names, name) && fail(ps, "duplicate group name")
         for other in get(ps.names, name, NamedGroup[])
             separate_alternatives(other.path, ps.path) || fail(ps, "duplicate group name")
         end
@@ -657,8 +673,8 @@ function group_name!(ps::Parser)
             ps.i += 1
         end
         if isempty(name)
-            (is(c, '$') || is(c, '_') || UCD.contains(ID_START, c)) || fail(ps, "invalid group name")
-        elseif !(is(c, '$') || c == 0x200C || c == 0x200D || UCD.contains(ID_CONTINUE, c))
+            (is(c, '$') || is(c, '_') || UCD.contains(id_start(ps.ucd), c)) || fail(ps, "invalid group name")
+        elseif !(is(c, '$') || c == 0x200C || c == 0x200D || UCD.contains(id_continue(ps.ucd), c))
             fail(ps, "invalid group name")
         end
         push!(name, c)
@@ -690,7 +706,7 @@ function atom_escape!(ps::Parser)
             name = group_name!(ps)
             ps.named_refs = true
             ps.needs_backtracking = true
-            return backref_node(Int[], name, ps.icase), true
+            return backref_node(Int[], name, ps.icase, ps.ucd.major), true
         end
         ps.i += 1
         return char_node_of(ps, Int('k')), true
@@ -700,7 +716,7 @@ function atom_escape!(ps::Parser)
         n = number!(ps)
         if n <= ps.group_count
             ps.needs_backtracking = true
-            return backref_node(Int[n], Int[], ps.icase), true
+            return backref_node(Int[n], Int[], ps.icase, ps.ucd.major), true
         end
         ps.unicode && fail(ps, "reference to a group that does not exist")
         # Annex B reads it as an octal escape, or as the digit itself.
@@ -769,10 +785,11 @@ function class_escape!(ps::Parser, c::Int)
         # A name ECMA-262 defines is ASCII. Any other character makes a name no table has.
         expr = String(Char.(view(ps.p, start+1:ps.i)))
         eat!(ps, '}') || fail(ps, "invalid property name")
-        found = property_set(expr)
+        # The 2020 grammar knows only the names and values of its own tables, whatever the version of Unicode.
+        found = !ps.es2020 || es2020_has_property(expr) ? property_set(ps.ucd, expr) : nothing
         if found === nothing
             if ps.sets && is(c, 'p')
-                property = string_property_of(expr)
+                property = string_property_of(ps.ucd, expr)
                 if property !== nothing
                     # A property of strings, which the v flag alone names, and which has no complement.
                     charge!(ps, RANGE_SIZE * (length(property.set.ranges) ÷ 2 + length(property.strings)))
@@ -1186,7 +1203,8 @@ strings_value(ps::Parser, set::CharSet, strs::Vector{Vector{Int}}) =
 A string as its code points, each canonicalized in a case-insensitive group so that strings are compared as ECMA-262
 compares them.
 """
-canonical_string(ps::Parser, code_points::Vector{Int}) = [ps.icase ? canonicalize(c, true) : c for c in code_points]
+canonical_string(ps::Parser, code_points::Vector{Int}) =
+    [ps.icase ? canonicalize(ps.ucd, c, true) : c for c in code_points]
 
 """
 The node of a class of the v flag's grammar: its set, or, where it holds strings, the alternatives of its strings
