@@ -139,22 +139,25 @@ end
 """
 The Unicode of one version: its generated data, and what is built from it on first use and then kept (`built`), the
 General_Category groups, the case folding classes, the property sets and the properties of strings among them.
+
+It is a mutable struct of constant fields so that the parser, which holds one, holds a reference: an immutable struct
+of these fields would be stored inline, and every read of it would copy its fields, and root each, on the stack.
 """
-struct Ucd
-    version::String
-    major::Int
-    category_tables::Dict{String,Table}
-    binary_tables::Dict{String,Table}
-    script_tables::Dict{String,Table}
-    script_extensions_tables::Dict{String,Table}
-    script_names::Vector{Vector{String}}
-    binary_names::Vector{String}
-    case_folds::Vector{CaseRange}
-    upper_cases::Vector{CaseRange}
+mutable struct Ucd
+    const version::String
+    const major::Int
+    const category_tables::Dict{String,Table}
+    const binary_tables::Dict{String,Table}
+    const script_tables::Dict{String,Table}
+    const script_extensions_tables::Dict{String,Table}
+    const script_names::Vector{Vector{String}}
+    const binary_names::Vector{String}
+    const case_folds::Vector{CaseRange}
+    const upper_cases::Vector{CaseRange}
     "The properties of strings of the v flag (strings<major>_gen.jl)."
-    strings::Vector{NTuple{3,String}}
-    built::Dict{Any,Any}
-    lock::ReentrantLock
+    const strings::Vector{NTuple{3,String}}
+    const built::Dict{Any,Any}
+    const lock::ReentrantLock
 end
 
 function Ucd(m::Module)
