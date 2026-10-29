@@ -1,4 +1,4 @@
-# CorvusRegexEcma262.jl
+# CorvusRegexECMA262.jl
 
 Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` of JavaScript, for Julia 1.10 and later.
 
@@ -24,7 +24,7 @@ Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` o
 - A pattern without a backreference is matched in time proportional to its size times the text. A pattern can be given
   a match timeout, as a `Regex` of .NET can, which bounds the time and the backtracking memory of every match. With a
   timeout and the package's limits of pattern size, neither a pattern nor a text from outside can make a program hang.
-  `set_default_match_timeout!` gives every pattern one. `CorvusRegexEcma262.try_compile(pattern, flags; match_timeout)`
+  `set_default_match_timeout!` gives every pattern one. `CorvusRegexECMA262.try_compile(pattern, flags; match_timeout)`
   gives a pattern its own and returns `(regex, nothing)` or `(nothing, error)` in place of throwing (and
   `tryparse(EcmaRegex, pattern, flags)` the regex or `nothing`), so a validator needs neither the default nor a `try`.
 - The search layer of the crate: literals found by their rarest bytes, the windows of an alternation, the search after
@@ -45,7 +45,7 @@ It is a port of the Rust crate [corvus-regex-ecma262](https://github.com/corvus-
 follows the design of the .NET engine [Corvus.Regex.Ecma262](https://github.com/corvus-dotnet/Corvus.Regex.Ecma262).
 
 ```julia
-using CorvusRegexEcma262
+using CorvusRegexECMA262
 
 re = ecma"(?<year>\d{4})-(?<month>\d{2})"u
 occursin(re, "on 2026-10-25")                          # true
@@ -61,7 +61,7 @@ match!(c, text) && capture_range(c, 2)                 # 9:10
 findall(ecma"\p{Lu}"u, transcode(UInt16, "Ab Cd"))     # [1:1, 4:4], in UTF-16 code units
 
 # ECMAScript 2020 as its edition was published, with the Unicode of its year, and a match timeout of its own.
-greek, err = CorvusRegexEcma262.try_compile("^\\p{Script=Greek}+\$", "u"; match_timeout=1,
+greek, err = CorvusRegexECMA262.try_compile("^\\p{Script=Greek}+\$", "u"; match_timeout=1,
                                             edition=:es2020, unicode_version=13)
 ```
 
@@ -79,7 +79,7 @@ the package still has no dependency.
 
 ```julia
 using Pkg
-Pkg.add("CorvusRegexEcma262")
+Pkg.add("CorvusRegexECMA262")
 ```
 
 The package has no dependency.

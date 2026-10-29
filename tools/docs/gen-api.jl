@@ -5,8 +5,8 @@
 #     julia --project=. tools/docs/gen-api.jl           # write docs/api.md
 #     julia --project=. tools/docs/gen-api.jl --check   # fail when docs/api.md is not what the docstrings make (CI)
 
-using CorvusRegexEcma262
-const M = CorvusRegexEcma262
+using CorvusRegexECMA262
+const M = CorvusRegexECMA262
 
 # (shown as, module, binding)
 const SECTIONS = [
@@ -35,7 +35,7 @@ const SECTIONS = [
 function docstrings(mod, name)
     meta = Base.Docs.meta(M)
     b = Base.Docs.Binding(mod, name)
-    haskey(meta, b) || error("$(mod).$(name) has no docstring in CorvusRegexEcma262")
+    haskey(meta, b) || error("$(mod).$(name) has no docstring in CorvusRegexECMA262")
     docs = collect(meta[b].docs)
     sort!(docs; by=p -> string(first(p)))
     return [fence(join(string.(last(p).text))) for p in docs]
@@ -62,7 +62,7 @@ end
 function page()
     io = IOBuffer()
     println(io, "# API reference\n")
-    println(io, "The public names of `CorvusRegexEcma262`, generated from the package's docstrings by `tools/docs/gen-api.jl`.")
+    println(io, "The public names of `CorvusRegexECMA262`, generated from the package's docstrings by `tools/docs/gen-api.jl`.")
     println(io, "[Getting started](getting-started.md) shows them at work.\n")
     for (section, items) in SECTIONS
         println(io, "## ", section, "\n")

@@ -30,7 +30,7 @@
 # fetched from dotnet/performance when missing. The run unzips each once into a directory of its own
 # (CORVUS_REGEX_PLAIN), which the children read.
 
-using CorvusRegexEcma262
+using CorvusRegexECMA262
 using Printf
 
 const SOURCE = "https://raw.githubusercontent.com/dotnet/performance/main/src/benchmarks/micro/libraries/" *
@@ -293,7 +293,7 @@ function facts(seconds, passes, extra)
         # On a GitHub-hosted runner, what the runner says it is.
         ("runner", get(ENV, "RUNNER_NAME", "")), ("runner_os", get(ENV, "RUNNER_OS", "")),
         ("image", strip(get(ENV, "ImageOS", "") * " " * get(ENV, "ImageVersion", ""))),
-        ("corvus-regex-ecma262", string(pkgversion(CorvusRegexEcma262))),
+        ("corvus-regex-ecma262", string(pkgversion(CorvusRegexECMA262))),
         ("pcre2", "PCRE2 $(pcre2_version()) (Julia $(VERSION))")]
     append!(f, extra)
     return "{" * join([json_string(k) * ":" * json_string(string(v)) for (k, v) in f], ",") * "}"

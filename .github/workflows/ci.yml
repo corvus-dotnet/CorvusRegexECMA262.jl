@@ -74,7 +74,7 @@ jobs:
       run: |
         ./tools/release/stamp.ps1 -Tag v99.98.97
         if (-not (Select-String -Path Project.toml -SimpleMatch 'version = "99.98.97"' -Quiet)) { throw 'the version was not stamped' }
-        julia --startup-file=no --project=. -e 'using CorvusRegexEcma262; v = pkgversion(CorvusRegexEcma262); v == v"99.98.97" || error("pkgversion is $v")'
+        julia --startup-file=no --project=. -e 'using CorvusRegexECMA262; v = pkgversion(CorvusRegexECMA262); v == v"99.98.97" || error("pkgversion is $v")'
         git checkout -- Project.toml
     - name: The benchmark harness's scripts read
       # The harness itself runs in the harness-image workflow; here its scripts are parsed on every Julia.

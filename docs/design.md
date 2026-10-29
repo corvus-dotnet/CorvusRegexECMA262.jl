@@ -1,4 +1,4 @@
-# CorvusRegexEcma262.jl: design
+# CorvusRegexECMA262.jl: design
 
 An outline of the package as it is: what it offers, how the engine is built and why, and how it is tested and
 measured. The [getting-started page](getting-started.md) shows how to use it.
