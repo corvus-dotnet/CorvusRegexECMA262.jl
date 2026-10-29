@@ -7,11 +7,7 @@
       "nextVersion": "0.1.0",
       "paths": [
         "Project.toml",
-        "src/",
-        "docs/getting-started.md",
-        "docs/api.md",
-        "docs/design.md",
-        "docs/contributing.md"
+        "src/"
       ],
       "stamp": [
         {
