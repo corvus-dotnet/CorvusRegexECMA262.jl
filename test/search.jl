@@ -104,6 +104,24 @@ end
     end
 end
 
+# The windows search with the reverse automaton tries a waiting start once no later occurrence could allow an earlier
+# one, looking for one within the window's reach, which is a number of characters. Over two- and three-byte UTF-8, or
+# surrogate pairs under u, that is more units than characters: looked for that many units ahead, the later occurrence
+# was missed and a later start answered ((?:b.{2,6})?x over "bxſſſſx" from 1, not 0).
+@testset "a window reaches as many characters as it counts" begin
+    patterns = ["(?:b.{2,6})?x", "(?:[a-z][\\s\\S]{1,8})?xy", "(?:\\w[^a]{3,5})?x", "(|([^a]|[^a][^a]){2,4}){2}(\\3){3,5}?x"]
+    for pattern in patterns, flags in ("", "u")
+        searched, plain = searched_and_plain(pattern, flags)
+        literal = endswith(pattern, "xy") ? "xy" : "x"
+        for wide in ("ſ", "é", "€", "中", "😀", "a"), k in 0:9
+            text = "b" * literal * wide^k * literal
+            for input in (transcode(UInt16, text), codeunits(text))
+                @test all_spans(plain, input, false) == all_spans(searched, input, false)
+            end
+        end
+    end
+end
+
 @testset "a literal with a rare byte is found as any other" begin
     next = xorshift(UInt64(0x2f6b1c3d))
     below(n) = Int(next() % n)
