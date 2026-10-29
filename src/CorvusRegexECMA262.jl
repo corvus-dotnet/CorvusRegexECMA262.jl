@@ -1,5 +1,5 @@
 """
-    CorvusRegexEcma262
+    CorvusRegexECMA262
 
 Regular expressions with the grammar and the answers of ECMA-262, the `RegExp` of JavaScript, over UTF-8 (a `String`,
 a `SubString`, or a `Utf8Text`, which is checked once) and UTF-16 (a vector of `UInt16`, lone surrogates and all).
@@ -12,7 +12,7 @@ Nothing is transcoded, and text that is not UTF-8 is refused, never read as U+FF
 The engine is a port of the Rust crate corvus-regex-ecma262, file for file (parse.jl is parse.rs, compile.jl is
 compile.rs, and so on), held to the same ECMA-262 test data.
 """
-module CorvusRegexEcma262
+module CorvusRegexECMA262
 
 export EcmaRegex, @ecma_str, EcmaMatch, Utf8Text, Captures, match!, eachmatch!, capture_range, ecmasplit
 

@@ -1,10 +1,10 @@
 {
   "packages": [
     {
-      "name": "CorvusRegexEcma262",
+      "name": "CorvusRegexECMA262",
       "tag": "v",
       "stampedTag": true,
-      "nextVersion": "0.1.0",
+      "nextVersion": "0.2.0",
       "paths": [
         "Project.toml",
         "src/"
@@ -20,7 +20,7 @@
     },
     {
       "name": "harness",
-      "harnessOf": "CorvusRegexEcma262",
+      "harnessOf": "CorvusRegexECMA262",
       "tag": "harness-",
       "paths": [
         "Dockerfile",

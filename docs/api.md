@@ -1,6 +1,6 @@
 # API reference
 
-The public names of `CorvusRegexEcma262`, generated from the package's docstrings by `tools/docs/gen-api.jl`.
+The public names of `CorvusRegexECMA262`, generated from the package's docstrings by `tools/docs/gen-api.jl`.
 [Getting started](getting-started.md) shows them at work.
 
 ## Compiling

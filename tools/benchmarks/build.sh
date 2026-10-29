@@ -3,4 +3,4 @@
 # starts on compiled code. run.sh calls it, and the image (Dockerfile) calls it when it is built.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-julia --startup-file=no --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using CorvusRegexEcma262'
+julia --startup-file=no --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using CorvusRegexECMA262'

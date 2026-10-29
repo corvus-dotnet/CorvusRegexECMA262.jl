@@ -1,7 +1,7 @@
-using CorvusRegexEcma262
+using CorvusRegexECMA262
 using Test
 
-const C = CorvusRegexEcma262
+const C = CorvusRegexECMA262
 
 @testset "flags" begin
     f = C.parse_flags("ysvmigd")

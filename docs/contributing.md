@@ -21,10 +21,10 @@ Windows, `curl -fsSL https://install.julialang.org | sh` on Linux and macOS) and
 ## 2. Getting the sources
 
 ```
-git clone https://github.com/corvus-dotnet/corvus-regex-ecma262-jl.git
+git clone https://github.com/corvus-dotnet/CorvusRegexECMA262.jl.git
 git clone https://github.com/corvus-dotnet/ecma262-regex-test-data.git   # beside it: the test data
 git clone https://github.com/corvus-dotnet/corvus-regex-ecma262-rs.git   # beside it: for the table check
-cd corvus-regex-ecma262-jl
+cd CorvusRegexECMA262.jl
 ```
 
 The test data is the oracle for the engine (design, section 6). It is not vendored; the commands below assume it at

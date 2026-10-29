@@ -24,8 +24,8 @@
 # (docs/implementing-a-source.md in corvus-regex-ecma262-benchmarks): the counts, this runner and the calls it makes in
 # each encoding, and what it leaves out, which for this library is nothing.
 
-using CorvusRegexEcma262
-const C = CorvusRegexEcma262
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
 
 const LIMIT = 2.0
 const REPLACEMENT = "<\$&|\$1|\$2|\$10|\$<a>|\$\$|\$`|\$'>"
@@ -708,13 +708,13 @@ encoding it asked in, and what it leaves out.
 """
 function write_compliance(path::String, t::Counts)
     calls = String[]
-    AS_UTF16[] && push!(calls, "\"utf16\":[\"occursin\",\"CorvusRegexEcma262.exec_slots\",\"CorvusRegexEcma262.find_all\"," *
-                               "\"CorvusRegexEcma262.replace_units\",\"CorvusRegexEcma262.split_units\"]")
-    AS_UTF8[] && push!(calls, "\"utf8\":[\"occursin\",\"CorvusRegexEcma262.exec_slots\",\"CorvusRegexEcma262.find_all\"," *
-                              "\"CorvusRegexEcma262.replace_units\"]")
+    AS_UTF16[] && push!(calls, "\"utf16\":[\"occursin\",\"CorvusRegexECMA262.exec_slots\",\"CorvusRegexECMA262.find_all\"," *
+                               "\"CorvusRegexECMA262.replace_units\",\"CorvusRegexECMA262.split_units\"]")
+    AS_UTF8[] && push!(calls, "\"utf8\":[\"occursin\",\"CorvusRegexECMA262.exec_slots\",\"CorvusRegexECMA262.find_all\"," *
+                              "\"CorvusRegexECMA262.replace_units\"]")
     json = "{\"right\":$(t.right),\"wrong\":$(t.wrong),\"refused\":$(t.refused),\"acceptedInvalid\":$(t.accepted)," *
            "\"limited\":$(t.limited + t.errors),\"judge\":{\"runner\":" *
-           "\"https://github.com/corvus-dotnet/corvus-regex-ecma262-jl/blob/main/tools/dataset/run.jl\"," *
+           "\"https://github.com/corvus-dotnet/CorvusRegexECMA262.jl/blob/main/tools/dataset/run.jl\"," *
            "\"calls\":{$(join(calls, ","))}},\"excludes\":[]}\n"
     write(path, json)
 end

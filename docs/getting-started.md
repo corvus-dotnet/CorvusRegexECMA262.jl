@@ -2,7 +2,7 @@
 
 ## Introduction
 
-`CorvusRegexEcma262` is a Julia package whose patterns answer as ECMAScript does. Where Julia's `Regex` has PCRE's
+`CorvusRegexECMA262` is a Julia package whose patterns answer as ECMAScript does. Where Julia's `Regex` has PCRE's
 grammar and its meaning for `\d`, `\w`, `\s`, `.`, case folding and Unicode properties, this package has ECMA-262's,
 so a pattern written for JavaScript, or taken from a JSON Schema, matches the same texts here as it does there. It is a
 port of the corvus-regex-ecma262 Rust crate in pure Julia, held to V8's answers on the ECMA-262 test data, and it works
@@ -22,13 +22,13 @@ This guide covers:
 
 ```
 using Pkg
-Pkg.add("CorvusRegexEcma262")
+Pkg.add("CorvusRegexECMA262")
 ```
 
 It needs Julia 1.10 or later, on any platform Julia runs on, and has no dependencies.
 
 ```julia
-using CorvusRegexEcma262
+using CorvusRegexECMA262
 ```
 
 ## Patterns and flags
@@ -48,7 +48,7 @@ A pattern is written as it would be in JavaScript, and the flags are the letters
 | `y` | A match only at the start position. |
 
 ```julia
-using CorvusRegexEcma262
+using CorvusRegexECMA262
 
 a = ecma"\p{Script=Greek}+"u                     # the same as EcmaRegex(pattern, "u")
 b = ecma"[[a-z]--[aeiou]]+"v
@@ -64,8 +64,8 @@ with no flag. JSON Schema's reading, the `u` flag first and Annex B when that re
 which throws nothing and takes the match timeout, so no default timeout is needed:
 
 ```julia
-using CorvusRegexEcma262
-const C = CorvusRegexEcma262
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
 
 function schema_pattern(pattern)
     re, err = C.try_compile(pattern, "u"; match_timeout = 1)
@@ -83,8 +83,8 @@ invalid flags throw a `FlagsError`. Every pattern has deterministic limits of si
 is passed. `try_compile` returns the same error in place of throwing it.
 
 ```julia
-using CorvusRegexEcma262
-const C = CorvusRegexEcma262
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
 
 @assert try EcmaRegex("a{2,1}", "u"); false catch e; e isa C.InvalidPatternError end
 
@@ -110,8 +110,8 @@ characters of a group name and the case folding of the `i` flag. The `unicode_ve
 pattern was compiled with. Both are read when the pattern is compiled, so a match costs the same whichever is chosen.
 
 ```julia
-using CorvusRegexEcma262
-const C = CorvusRegexEcma262
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
 
 # ECMAScript 2020 as its edition was published, with the Unicode of its year.
 greek = EcmaRegex("^\\p{Script=Greek}+\$", "u"; match_timeout = 1, edition = :es2020, unicode_version = 13)
@@ -127,7 +127,7 @@ The verbs are Base's, with the position as an argument where JavaScript keeps `l
 read as a `RegexMatch` is, and positions are Julia's string indices, 1-based byte offsets into the UTF-8 text.
 
 ```julia
-using CorvusRegexEcma262
+using CorvusRegexECMA262
 
 date = ecma"(?<year>\d{4})-(?<month>\d{2})"gu
 text = "due 2026-10, then 2027-01"
@@ -154,7 +154,7 @@ m = match(date, text)
 made once, allocate nothing once it has grown:
 
 ```julia
-using CorvusRegexEcma262
+using CorvusRegexECMA262
 
 date = ecma"(?<year>\d{4})-(?<month>\d{2})"u
 c = Captures(date)
@@ -171,8 +171,8 @@ with a `MatchTimeoutError`, and one that reaches the cap on backtracking memory 
 `MatchMemoryError`, whatever the pattern:
 
 ```julia
-using CorvusRegexEcma262
-const C = CorvusRegexEcma262
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
 
 slow = EcmaRegex("^(?:(a+)\\1*)+\$", ""; match_timeout = 0.1)
 @assert try occursin(slow, "a"^60 * "b"); false catch e; e isa C.MatchTimeoutError end
@@ -180,7 +180,7 @@ slow = EcmaRegex("^(?:(a+)\\1*)+\$", ""; match_timeout = 0.1)
 
 A pattern compiled without a timeout takes `default_match_timeout()`, which is `nothing` unless
 `set_default_match_timeout!` sets it. A program that matches patterns or texts from outside should set one, for example
-with `CorvusRegexEcma262.set_default_match_timeout!(1)` when it starts.
+with `CorvusRegexECMA262.set_default_match_timeout!(1)` when it starts.
 
 A pattern without a backreference is matched in time linear in the text, and no pattern can overflow the stack, so the
 timeout is what bounds the others.
@@ -193,8 +193,8 @@ text once, for a text matched many times. A `Vector{UInt16}` is UTF-16 code unit
 ranges in code units.
 
 ```julia
-using CorvusRegexEcma262
-const C = CorvusRegexEcma262
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
 
 dot_b = ecma".b"u
 @assert findfirst(dot_b, "a😀b") == 2:6                       # bytes of UTF-8

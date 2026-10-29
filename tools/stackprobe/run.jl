@@ -11,8 +11,8 @@
 # fault: a stack overflow, or any other error. Any fault makes the exit status 1. Julia throws StackOverflowError where
 # a task's stack runs out, so a fault is seen in the process rather than ending it.
 
-using CorvusRegexEcma262
-const C = CorvusRegexEcma262
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
 
 struct Probe
     name::String

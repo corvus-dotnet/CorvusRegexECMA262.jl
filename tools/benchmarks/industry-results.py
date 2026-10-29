@@ -125,7 +125,7 @@ data = {
     "meta": {
         "title": "corvus-regex-ecma262 for Julia: the Industry benchmarks",
         "lede": "This library over UTF-8 and UTF-16 beside Julia's Base.Regex (PCRE2) and V8 over the Industry workloads of dotnet/performance.",
-        "repo": "corvus-dotnet/corvus-regex-ecma262-jl",
+        "repo": "corvus-dotnet/CorvusRegexECMA262.jl",
         "commit": facts.get("commit", "")[:7],
         "date": run.get("end") or facts.get("date", ""),
         "start": facts.get("date", ""),

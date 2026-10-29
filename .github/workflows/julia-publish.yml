@@ -22,9 +22,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PACKAGE: CorvusRegexEcma262
+  PACKAGE: CorvusRegexECMA262
   REGISTRY: JuliaRegistries/General
-  REGISTRY_PATH: C/CorvusRegexEcma262
+  REGISTRY_PATH: C/CorvusRegexECMA262
 
 jobs:
   register:
