@@ -25,6 +25,9 @@ modifier groups, a group name used twice, and property names outside its tables)
 Unicode whose tables it is read with, independent of the edition: `:default` (V8's, 17 today), `13`, `17`, `18` or
 `:latest` (18 today). Both are settled when the pattern is compiled and cost a match nothing.
 
+What a pattern is can be read from its fields: `pattern`, the pattern as it was given; `flags`, which `string` writes
+as RegExp.prototype.flags does; `edition`; and `unicode_version`, resolved to 13, 17 or 18.
+
 An invalid pattern throws an InvalidPatternError, a pattern over a limit of size a TooLargeError, and invalid flags a
 FlagsError. A compiled pattern is safe to share between tasks.
 
