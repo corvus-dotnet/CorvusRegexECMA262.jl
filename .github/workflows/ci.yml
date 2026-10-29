@@ -39,6 +39,10 @@ jobs:
         version: ${{ matrix.julia }}
     - name: Test
       run: julia --startup-file=no --color=yes --project=. -e 'using Pkg; Pkg.test()'
+    - name: The API reference is current
+      # docs/api.md, which the documentation site publishes, is what the package's docstrings make.
+      if: runner.os == 'Linux'
+      run: julia --startup-file=no --project=. tools/docs/gen-api.jl --check
     - name: Test with the memory of failed places from the first step
       if: runner.os == 'Linux'
       run: julia --startup-file=no --color=yes --project=. -e 'using Pkg; Pkg.test()'
