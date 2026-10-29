@@ -338,6 +338,12 @@ function search_reverse(p::Program, st::State, input::Text16or8, start::Int, nee
         while pend0 | pend1 != 0
             k = pend0 != 0 ? trailing_zeros(pend0) : 64 + trailing_zeros(pend1)
             at = base + k
+            # The reach is hi characters, which is hi units only over ASCII: past a unit beyond ASCII the look ahead
+            # could stop short of an occurrence that allows an earlier start, so the search is made again the plain
+            # way, which counts in characters.
+            for i in at:min(at + hi, len)-1
+                unit(input, i) >= 0x80 && return 0, false, false
+            end
             if after <= at + hi
                 q2 = find_within(lits, input, after, at + hi)
                 if q2 >= 0
