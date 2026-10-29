@@ -95,10 +95,14 @@ re, err = C.try_compile("a", "uv"; match_timeout = 1)
 
 ## The edition and the version of Unicode
 
-JSON Schema 2020-12 names the grammar of ECMAScript 2020. `edition = :es2020` refuses what later editions added, and
-nothing else: the `d` and `v` flags, modifier groups such as `(?i:...)`, a group name used by two groups, and a
-property name or value that is not in the 2020 tables (such as `\p{Script=Yezidi}`). A pattern it accepts has the same
-answers as in today's grammar.
+By default a pattern is read with today's grammar, ECMAScript 2025 (`edition = :current`), and with the tables of the
+version of Unicode that V8 carries, 17 today (`unicode_version = :default`). Either can be overridden when the pattern
+is compiled, each independently of the other.
+
+JSON Schema 2020-12 names the grammar of ECMAScript 2020, which `edition = :es2020` selects in place of the default. It
+refuses what later editions added, and nothing else: the `d` and `v` flags, modifier groups such as `(?i:...)`, a group
+name used by two groups, and a property name or value that is not in the 2020 tables (such as `\p{Script=Yezidi}`). A
+pattern it accepts has the same answers as in today's grammar.
 
 The version of Unicode is chosen apart from the edition: `unicode_version` is 13, 17, 18, `:latest` (18 today) or
 `:default`, the version of the V8 the answers are held to (17 today). It decides the members of each `\p{...}`, the
