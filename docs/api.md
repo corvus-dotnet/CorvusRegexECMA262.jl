@@ -63,8 +63,20 @@ The compiled pattern, or `nothing` when it is not valid (see `try_compile`, whic
 isvalid_pattern(pattern, flags = ""; edition = :current, unicode_version = :default)
 ```
 
-Whether a pattern is valid with the flags and within the limits of size, in the grammar of an edition and under a
-version of Unicode (see `EcmaRegex`).
+Whether a pattern is valid in the grammar of ECMA-262 for the flags, of an edition and under a version of Unicode. It
+asks the grammar only: unlike `EcmaRegex` and `try_compile`, which read the pattern as compiling it does, it does not
+apply the limits of size (`MAX_PATTERN_LENGTH`, `MAX_NESTING`, `MAX_SIZE`), so a pattern too large to compile is valid
+here when its grammar is. It reads the pattern in place with stacks of its own, so no pattern can overflow the stack,
+and once its stacks have grown to what the patterns need it allocates nothing. The u and v flags choose the grammar,
+and the others do not change it. It is `false` too for flags that are not valid, alone or with the edition, and for a
+pattern that is not UTF-8. It is the check a JSON Schema `format: regex` needs, as the .NET engine's `IsValidPattern`
+and the Rust crate's `is_valid_pattern` are.
+
+```julia
+deep = "("^5000 * ")"^5000
+isvalid_pattern(deep, "u")                               # true, though it is too large to compile
+isvalid_pattern("(?i:a)", "u"; edition = :es2020)        # false: ECMAScript 2020 has no modifier groups
+```
 
 ### set_default_match_timeout!
 

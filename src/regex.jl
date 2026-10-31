@@ -227,25 +227,49 @@ Base.tryparse(::Type{EcmaRegex}, pattern::AbstractString, flags::Union{AbstractS
 """
     isvalid_pattern(pattern, flags = ""; edition = :current, unicode_version = :default)
 
-Whether a pattern is valid with the flags and within the limits of size, in the grammar of an edition and under a
-version of Unicode (see `EcmaRegex`).
+Whether a pattern is valid in the grammar of ECMA-262 for the flags, of an edition and under a version of Unicode. It
+asks the grammar only: unlike `EcmaRegex` and `try_compile`, which read the pattern as compiling it does, it does not
+apply the limits of size (`MAX_PATTERN_LENGTH`, `MAX_NESTING`, `MAX_SIZE`), so a pattern too large to compile is valid
+here when its grammar is. It reads the pattern in place with stacks of its own, so no pattern can overflow the stack,
+and once its stacks have grown to what the patterns need it allocates nothing. The u and v flags choose the grammar,
+and the others do not change it. It is `false` too for flags that are not valid, alone or with the edition, and for a
+pattern that is not UTF-8. It is the check a JSON Schema `format: regex` needs, as the .NET engine's `IsValidPattern`
+and the Rust crate's `is_valid_pattern` are.
+
+```julia
+deep = "("^5000 * ")"^5000
+isvalid_pattern(deep, "u")                               # true, though it is too large to compile
+isvalid_pattern("(?i:a)", "u"; edition = :es2020)        # false: ECMAScript 2020 has no modifier groups
+```
 """
 function isvalid_pattern(pattern::AbstractString, flags::AbstractString=""; edition::Symbol=:current,
                          unicode_version::Union{Symbol,Integer}=:default)
-    sx = try
-        syntax_of(parse_flags(flags), edition, unicode_version)
-    catch e
-        e isa FlagsError || rethrow()
-        return false
-    end
+    edition in (:current, :es2020) || throw(ArgumentError("the edition is :current or :es2020, not $(repr(edition))"))
+    major = resolve_unicode_version(unicode_version)
+    bits = flag_bits(flags)
+    bits < 0 && return false
+    es2020 = edition === :es2020
+    # The grammar of ECMAScript 2020 has no d flag (2022) and no v flag (2024).
+    es2020 && bits & (FLAG_D | FLAG_V) != 0 && return false
     isvalid(pattern) || return false
-    try
-        parse_with(pattern, sx)
-        return true
-    catch e
-        (e isa SyntaxError || e isa TooLargeError) && return false
-        rethrow()
+    unicode = bits & (FLAG_U | FLAG_V) != 0
+    return validate_pattern(pattern isa String ? pattern : String(pattern), unicode, bits & FLAG_V != 0, es2020, major)
+end
+
+# The bits of the flags in flag_bits, one for each letter of FLAG_LETTERS.
+const FLAG_D = 1
+const FLAG_U = 1 << 5
+const FLAG_V = 1 << 6
+
+"The flags as bits, read as `parse_flags` reads them, or -1 for flags that are not valid. It allocates nothing."
+function flag_bits(flags::AbstractString)
+    bits = 0
+    for c in flags
+        k = findfirst(==(c), FLAG_LETTERS)
+        (k === nothing || bits & (1 << (k - 1)) != 0) && return -1
+        bits |= 1 << (k - 1)
     end
+    return bits & FLAG_U != 0 && bits & FLAG_V != 0 ? -1 : bits
 end
 
 """

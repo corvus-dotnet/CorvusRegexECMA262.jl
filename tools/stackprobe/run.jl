@@ -77,8 +77,9 @@ function ask(p::Probe)
     re = try
         EcmaRegex(pattern, p.flags; match_timeout=5.0)
     catch e
+        # isvalid_pattern asks the grammar alone, so a pattern too large to compile may be valid to it.
         if e isa C.TooLargeError
-            return valid ? "FAULT isvalid_pattern accepted a pattern too large to compile" : "refused too large"
+            return "refused too large"
         elseif e isa C.InvalidPatternError
             return valid ? "FAULT isvalid_pattern accepted a pattern the constructor refused: $(sprint(showerror, e))" :
                    "refused not valid"
