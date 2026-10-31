@@ -1,7 +1,7 @@
 name = "CorvusRegexECMA262"
 uuid = "326d20a7-0de9-4590-a406-03b1785a0ae5"
 authors = ["Endjin Limited"]
-version = "0.0.0"
+version = "0.2.1"
 
 [compat]
 julia = "1.10"
