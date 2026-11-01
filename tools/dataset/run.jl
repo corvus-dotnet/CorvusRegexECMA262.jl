@@ -135,8 +135,33 @@ compile(pattern::String, flags::String) =
 "Which limit a match reached, or `nothing` when the error is not a limit."
 limit_kind(e) = e isa C.MatchTimeoutError ? "time" : e isa C.MatchMemoryError ? "memory" : nothing
 
+# The answers of the grammar-only reader (isvalid_pattern) that agree with V8's, and those that do not.
+const READER_RIGHT = Threads.Atomic{Int}(0)
+const READER_WRONG = Threads.Atomic{Int}(0)
+
+"""
+Asks the grammar-only reader whether the pattern is valid in each grammar of the record, as V8 answered. It reads no
+limit of size, so its answer is the grammar's for a pattern of any size.
+"""
+function judge_reader(name::String, r, pattern::String, wrong::Vector{String})
+    flags = lossy(str(get_(r, "flags")))
+    for m in modes(r)
+        mode_flags = flags * m.add
+        expected_valid = m.valid == true
+        valid = C.isvalid_pattern(pattern, mode_flags; edition=EDITION[], unicode_version=UNICODE_VERSION[])
+        if valid == expected_valid
+            Threads.atomic_add!(READER_RIGHT, 1)
+        else
+            Threads.atomic_add!(READER_WRONG, 1)
+            push!(wrong, "READER\t" * name * "\t/" * escape(transcode(UInt16, pattern)) * "/" * mode_flags *
+                         "\tV8 says " * (expected_valid ? "valid" : "not valid"))
+        end
+    end
+end
+
 function judge_record(name::String, r, c::Counts, wrong::Vector{String})
     pattern = lossy(str(get_(r, "pattern")))
+    name == EXEC || judge_reader(name, r, pattern, wrong)
     if name == EXEC
         judge_exec(r, pattern, c, wrong)
     elseif name == "captures.jsonl"
@@ -794,7 +819,8 @@ function main(args::Vector{String})
     println("records $(records[]) (skipped $(skipped[]) deviations)  right $(total.right)  wrong $(total.wrong)  " *
             "refused-valid $(total.refused)  accepted-invalid $(total.accepted)  limit $(total.limited)  errors $(total.errors)  " *
             "in $(round(time() - clock; digits=1))s")
-    total.wrong + total.refused + total.accepted + total.errors + total.limited == 0 || exit(1)
+    println("grammar-only reader: right $(READER_RIGHT[])  wrong $(READER_WRONG[])")
+    total.wrong + total.refused + total.accepted + total.errors + total.limited + READER_WRONG[] == 0 || exit(1)
 end
 
 filter_lines(lines) = [l for l in lines if !isempty(strip(l))]

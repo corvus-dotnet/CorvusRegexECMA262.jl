@@ -93,6 +93,18 @@ re, err = C.try_compile("a", "uv"; match_timeout = 1)
 @assert !C.isvalid_pattern("(?<n>a)(?<n>b)", "u")
 ```
 
+`isvalid_pattern` asks the grammar alone, without the limits of size: a pattern too large to compile is valid when its
+grammar is, and nothing is allocated once the stacks it reads with have grown to what the patterns need. It is the
+check for a JSON Schema `format: regex`. `tryparse` gives the answer of compiling, limits and all.
+
+```julia
+using CorvusRegexECMA262
+const C = CorvusRegexECMA262
+
+deep = "("^5000 * ")"^5000
+@assert C.isvalid_pattern(deep, "u") && tryparse(EcmaRegex, deep, "u") === nothing
+```
+
 ## The edition and the version of Unicode
 
 By default a pattern is read with today's grammar, ECMAScript 2025 (`edition = :current`), and with the tables of the

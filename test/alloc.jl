@@ -38,3 +38,23 @@ least_allocated(f, args...) = (f(args...); f(args...); minimum(@allocated(f(args
         @test (pattern, flags, timeout, least_allocated(reads_the_groups, re, c, text8, text16, text)) == (pattern, flags, timeout, 0)
     end
 end
+
+# The grammar-only reader allocates nothing once the stacks of the validators have grown to what the patterns need: for
+# a pattern valid or not, in any grammar, it keeps a group name as its place in the pattern and looks a property name
+# up as a view of it.
+function reads_the_grammar(cases)
+    for (pattern, flags) in cases
+        C.isvalid_pattern(pattern, flags)
+        C.isvalid_pattern(pattern, flags; edition=:es2020, unicode_version=13)
+    end
+    return nothing
+end
+
+@testset "the grammar-only reader allocates nothing" begin
+    names = join("(?<n$n>a)" for n in 0:39) * "\\k<n39>"
+    cases = [("^[a-z][a-z0-9_]{0,29}\$", "u"), ("^(?<year>\\d{4})-(?<month>\\d{2})\\k<year>\$", "u"),
+        ("(?<a>x)|(?<a>y)", "u"), ("^\\p{Script=Greek}+\\P{L}\\p{sc=Zzzz}\$", "u"), ("[\\p{L}--[a-z]&&\\q{abc|d}]", "v"),
+        ("[^\\p{RGI_Emoji}]", "v"), ("\\p{NoSuchProperty}", "u"), ("(?i:a)(?<=b)(?!c)", ""), ("\\8[\\c_]\\k{2}", ""),
+        ("[z-a]", "u"), ("(?<a>x)(?<a>y)", "u"), (names, "u"), ("(?:"^300 * "a" * ")"^300, "u")]
+    @test least_allocated(reads_the_grammar, cases) == 0
+end

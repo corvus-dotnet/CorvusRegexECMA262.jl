@@ -4,7 +4,7 @@
       "name": "CorvusRegexECMA262",
       "tag": "v",
       "stampedTag": true,
-      "nextVersion": "0.2.0",
+      "nextVersion": "0.3.0",
       "paths": [
         "Project.toml",
         "src/"
